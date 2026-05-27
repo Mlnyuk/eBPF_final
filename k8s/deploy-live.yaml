@@ -1,0 +1,185 @@
+# ============================================================================
+# eBPF_final — LIVE, registry-free deployment.
+#
+# This variant needs NO image build and NO private registry. It uses public
+# base images (python:3.12-slim, ubuntu:24.04) and an initContainer that
+# `git clone`s the public repo into a shared volume, then installs deps at
+# startup. Use this to deploy directly on a cluster that can reach github +
+# pypi + the ubuntu apt archive.
+#
+# For the production/registry path, see the other k8s/*.yaml (image-based).
+#
+#   kubectl apply -f k8s/deploy-live.yaml
+# ============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ebpf-final
+  labels:
+    app.kubernetes.io/part-of: ebpf-final
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ebpf-collector
+  namespace: ebpf-final
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ebpf-collector-reader
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ebpf-collector-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ebpf-collector-reader
+subjects:
+  - kind: ServiceAccount
+    name: ebpf-collector
+    namespace: ebpf-final
+---
+# ----------------------------------------------------------------------------
+# Detector / API. initContainer clones repo (code + committed model) into
+# /app; main container pip-installs requirements and serves the API.
+# ----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ebpf-detector
+  namespace: ebpf-final
+  labels: {app: ebpf-detector}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: ebpf-detector}
+  template:
+    metadata:
+      labels: {app: ebpf-detector}
+    spec:
+      initContainers:
+        - name: clone
+          image: alpine/git:latest
+          args: ["clone", "--depth", "1",
+                 "https://github.com/Mlnyuk/eBPF_final.git", "/app"]
+          volumeMounts: [{name: app, mountPath: /app}]
+      containers:
+        - name: detector
+          image: python:3.12-slim
+          workingDir: /app
+          # install deps then serve. pip needs egress to pypi.
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              pip install --no-cache-dir -r requirements.txt && \
+              exec uvicorn detector.api:app --host 0.0.0.0 --port 8080
+          env:
+            - {name: MODEL_PATH, value: /app/models/isolation_forest.pkl}
+            - {name: PYTHONUNBUFFERED, value: "1"}
+          ports: [{containerPort: 8080, name: http}]
+          readinessProbe:
+            httpGet: {path: /health, port: 8080}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 30
+          volumeMounts: [{name: app, mountPath: /app}]
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: "1", memory: 768Mi}
+      volumes:
+        - {name: app, emptyDir: {}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ebpf-detector
+  namespace: ebpf-final
+  labels: {app: ebpf-detector}
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/path: "/metrics"
+    prometheus.io/port: "8080"
+spec:
+  type: ClusterIP
+  selector: {app: ebpf-detector}
+  ports: [{name: http, port: 8080, targetPort: 8080}]
+---
+# ----------------------------------------------------------------------------
+# eBPF collector DaemonSet. initContainer clones repo; main container installs
+# BCC from apt (compiles against the node's mounted kernel headers) and runs
+# the collector, pushing each window to the detector.
+# ----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: ebpf-collector
+  namespace: ebpf-final
+  labels: {app: ebpf-collector}
+spec:
+  selector:
+    matchLabels: {app: ebpf-collector}
+  template:
+    metadata:
+      labels: {app: ebpf-collector}
+    spec:
+      serviceAccountName: ebpf-collector
+      hostPID: true
+      # Exclude control-plane nodes: they are disk-constrained (DiskPressure)
+      # and not intended to run the workload collector. Runs on all other
+      # schedulable nodes (worker/gpu/infra).
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
+      initContainers:
+        - name: clone
+          image: alpine/git:latest
+          args: ["clone", "--depth", "1",
+                 "https://github.com/Mlnyuk/eBPF_final.git", "/app"]
+          volumeMounts: [{name: app, mountPath: /app}]
+      containers:
+        - name: collector
+          image: ubuntu:24.04
+          workingDir: /app
+          securityContext:
+            privileged: true
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qq
+              apt-get install -y -qq bpfcc-tools python3-bpfcc python3-yaml python3-kubernetes
+              apt-get clean && rm -rf /var/lib/apt/lists/*   # shrink disk footprint
+              exec python3 collector/ebpf_collector.py \
+                --window 10 --out /data --format both \
+                --push-url "http://ebpf-detector.ebpf-final:8080"
+          env:
+            - name: NODE_NAME
+              valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+            - {name: ENABLE_K8S_MAPPING, value: "true"}
+            - {name: PYTHONUNBUFFERED, value: "1"}
+          volumeMounts:
+            - {name: app, mountPath: /app}
+            - {name: sys, mountPath: /sys}
+            - {name: modules, mountPath: /lib/modules, readOnly: true}
+            - {name: kernel-src, mountPath: /usr/src, readOnly: true}
+            - {name: data, mountPath: /data}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi, ephemeral-storage: 512Mi}
+            limits: {cpu: 500m, memory: 768Mi, ephemeral-storage: 1Gi}
+      volumes:
+        - {name: app, emptyDir: {sizeLimit: 256Mi}}
+        - {name: sys, hostPath: {path: /sys}}
+        - {name: modules, hostPath: {path: /lib/modules}}
+        - {name: kernel-src, hostPath: {path: /usr/src}}
+        - {name: data, emptyDir: {}}
