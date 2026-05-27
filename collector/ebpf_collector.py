@@ -209,13 +209,15 @@ _SUM_MAPS = {
 
 class EbpfCollector:
     def __init__(self, window: int, node: str, out_dir: str, out_format: str,
-                 enable_k8s: bool):
+                 enable_k8s: bool, push_url: str | None = None):
         from bcc import BPF  # imported lazily so non-eBPF hosts can import module
         self.window = window
         self.node = node
         self.out_dir = Path(out_dir)
         self.out_format = out_format
         self.mapper = default_mapper() if enable_k8s else None
+        # optional detector endpoint; each window is POSTed to <push_url>/detect/batch
+        self.push_url = push_url.rstrip("/") if push_url else None
         self._running = True
         print("[ebpf] compiling + loading BPF program ...")
         self.bpf = BPF(text=BPF_PROGRAM)
@@ -278,6 +280,29 @@ class EbpfCollector:
         if self.out_format in ("jsonl", "both"):
             write_jsonl(recs, self.out_dir / "features.jsonl")
 
+    def _push(self, recs):
+        """POST this window's feature records to the detector /detect/batch.
+        Best-effort: network errors are logged, never fatal to collection."""
+        if not self.push_url or not recs:
+            return
+        import json
+        import urllib.request
+        items = []
+        for r in recs:
+            row = r.to_row(FEATURE_COLUMNS)  # metadata + flat feature keys
+            items.append(row)
+        payload = json.dumps({"items": items}).encode()
+        url = f"{self.push_url}/detect/batch"
+        req = urllib.request.Request(
+            url, data=payload, headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                body = json.loads(resp.read())
+            print(f"[ebpf] pushed {len(items)} rows -> {url} "
+                  f"(anomalies={body.get('anomalies')})")
+        except Exception as exc:  # noqa: BLE001 - never crash the collector
+            print(f"[ebpf] push to {url} failed: {exc}")
+
     def stop(self, *_):
         self._running = False
 
@@ -290,6 +315,7 @@ class EbpfCollector:
             per_cg = self._drain()
             recs = self._to_records(per_cg)
             self._write(recs)
+            self._push(recs)
             print(f"[ebpf] window emitted {len(recs)} feature rows "
                   f"-> {self.out_dir}")
         print("[ebpf] stopped.")
@@ -309,6 +335,9 @@ def main():
         ccfg.get("node_name_env", "NODE_NAME"), os.uname().nodename))
     ap.add_argument("--no-k8s", action="store_true",
                     help="disable cgroup->pod mapping (stage-1 mode)")
+    ap.add_argument("--push-url", default=os.environ.get("DETECTOR_URL"),
+                    help="detector base URL; each window is POSTed to "
+                         "<url>/detect/batch (e.g. http://ebpf-detector:8080)")
     args = ap.parse_args()
 
     enable_k8s = (not args.no_k8s) and ccfg.get("enable_k8s_mapping", True)
@@ -317,6 +346,7 @@ def main():
         collector = EbpfCollector(
             window=args.window, node=args.node, out_dir=args.out,
             out_format=args.format, enable_k8s=enable_k8s,
+            push_url=args.push_url,
         )
     except ImportError:
         sys.exit("[ebpf] ERROR: bcc not installed. Install bpfcc-tools + "
