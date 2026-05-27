@@ -1,0 +1,79 @@
+# eBPF collector DaemonSet — one pod per node.
+#
+# Privileges: BCC compiles + loads BPF and attaches kprobes/tracepoints, which
+# requires CAP_BPF + CAP_SYS_ADMIN (and perf). We run privileged for MVP
+# simplicity; tighten to explicit capabilities for production.
+#
+# Host mounts:
+#   /sys              - BPF, tracefs, cgroupfs (cgroup->pod mapping)
+#   /lib/modules      - kernel modules (BCC)
+#   /usr/src          - kernel headers (BCC compiles against running kernel)
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: ebpf-collector
+  namespace: ebpf-final
+  labels:
+    app: ebpf-collector
+spec:
+  selector:
+    matchLabels:
+      app: ebpf-collector
+  template:
+    metadata:
+      labels:
+        app: ebpf-collector
+    spec:
+      serviceAccountName: ebpf-collector
+      hostPID: true            # see all host processes/cgroups
+      hostNetwork: true
+      tolerations:
+        - operator: Exists     # run on every node, including control-plane
+      containers:
+        - name: collector
+          # TODO: replace with your registry image, built from docker/Dockerfile.collector
+          image: ghcr.io/mlnyuk/ebpf-final-collector:latest
+          imagePullPolicy: IfNotPresent
+          args: ["--window", "10", "--out", "/data", "--format", "both"]
+          securityContext:
+            privileged: true
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: ENABLE_K8S_MAPPING
+              value: "true"
+          volumeMounts:
+            - name: config
+              mountPath: /app/configs
+            - name: sys
+              mountPath: /sys
+              readOnly: false
+            - name: modules
+              mountPath: /lib/modules
+              readOnly: true
+            - name: kernel-src
+              mountPath: /usr/src
+              readOnly: true
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: config
+          configMap:
+            name: ebpf-final-config
+        - name: sys
+          hostPath: {path: /sys}
+        - name: modules
+          hostPath: {path: /lib/modules}
+        - name: kernel-src
+          hostPath: {path: /usr/src}
+        - name: data
+          emptyDir: {}

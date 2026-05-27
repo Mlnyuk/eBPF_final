@@ -1,0 +1,21 @@
+# Service exposing the detector API + /metrics.
+# Prometheus annotations enable scraping of the /metrics endpoint.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ebpf-detector
+  namespace: ebpf-final
+  labels:
+    app: ebpf-detector
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/path: "/metrics"
+    prometheus.io/port: "8080"
+spec:
+  type: ClusterIP
+  selector:
+    app: ebpf-detector
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

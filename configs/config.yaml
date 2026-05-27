@@ -1,0 +1,59 @@
+# ============================================================
+# eBPF_final - global configuration
+# Shared by collector, detector, and API layers.
+# ============================================================
+
+# ---- Feature aggregation window ----
+window:
+  # Aggregation window in seconds. eBPF raw events are bucketed
+  # into fixed windows; one feature vector is emitted per window.
+  seconds: 10
+
+# ---- Feature schema ----
+# Ordered list of numeric feature columns fed into Isolation Forest.
+# IMPORTANT: order must stay stable across train and detect.
+features:
+  - syscall_read_rate
+  - syscall_write_rate
+  - syscall_open_rate
+  - tcp_connect_rate
+  - tcp_retransmit_rate
+  - network_rx_bytes
+  - network_tx_bytes
+  - disk_read_bytes
+  - disk_write_bytes
+  - disk_io_latency_ms
+  - process_exec_count
+  - process_fork_count
+  - context_switch_count
+
+# Identity / metadata columns (not used as model features).
+metadata_columns:
+  - timestamp
+  - node
+  - namespace
+  - pod
+  - container
+
+# ---- Isolation Forest model ----
+model:
+  path: models/isolation_forest.pkl
+  contamination: 0.02     # expected anomaly fraction; override via CLI
+  n_estimators: 200
+  max_samples: auto
+  random_state: 42
+
+# ---- Detector / API ----
+detector:
+  # Decision threshold on the normalized anomaly_score (0..1, higher = more anomalous).
+  # If null, fall back to the model's own contamination-based offset.
+  score_threshold: null
+  host: 0.0.0.0
+  port: 8080
+
+# ---- Collector ----
+collector:
+  node_name_env: NODE_NAME       # env var holding the k8s node name
+  output_dir: data               # where feature CSV/JSONL get written
+  output_format: both            # csv | jsonl | both
+  enable_k8s_mapping: true       # map cgroup_id -> pod/namespace via kubelet

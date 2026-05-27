@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Models (large binaries) - keep dir via .gitkeep
+models/*.pkl
+models/*.joblib
+
+# Data / results (generated) - keep dirs via .gitkeep
+data/*.csv
+data/*.jsonl
+results/*.csv
+results/*.jsonl
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/

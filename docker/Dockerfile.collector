@@ -1,0 +1,24 @@
+# eBPF collector image (DaemonSet). Needs BCC + kernel headers at runtime.
+#
+# BCC compiles the BPF program against the running kernel, so the image ships
+# the BCC toolchain. The host kernel headers are bind-mounted by the DaemonSet
+# (see k8s/daemonset-ebpf-collector.yaml). Ubuntu base matches common nodes.
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1
+
+# BCC toolchain + python bindings + python deps for feature output.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        bpfcc-tools python3-bpfcc python3-pip python3-yaml \
+        libbpfcc linux-headers-generic ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# k8s python client for cgroup->pod enrichment (optional at runtime).
+RUN pip3 install --no-cache-dir --break-system-packages kubernetes || true
+
+WORKDIR /app
+COPY configs/ ./configs/
+COPY collector/ ./collector/
+
+# bcc lives in the system python (python3-bpfcc), so use system python3 here.
+ENTRYPOINT ["python3", "collector/ebpf_collector.py"]

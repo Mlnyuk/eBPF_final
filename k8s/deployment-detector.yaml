@@ -1,0 +1,57 @@
+# Detector / API Deployment. Stateless; scale via replicas.
+# Ships the trained model baked into the image (models/isolation_forest.pkl).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ebpf-detector
+  namespace: ebpf-final
+  labels:
+    app: ebpf-detector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ebpf-detector
+  template:
+    metadata:
+      labels:
+        app: ebpf-detector
+    spec:
+      serviceAccountName: ebpf-detector
+      containers:
+        - name: detector
+          # TODO: replace with your registry image, built from docker/Dockerfile.detector
+          image: ghcr.io/mlnyuk/ebpf-final-detector:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: MODEL_PATH
+              value: /app/models/isolation_forest.pkl
+          volumeMounts:
+            - name: config
+              mountPath: /app/configs
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: config
+          configMap:
+            name: ebpf-final-config
