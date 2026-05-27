@@ -26,7 +26,6 @@ spec:
     spec:
       serviceAccountName: ebpf-collector
       hostPID: true            # see all host processes/cgroups
-      hostNetwork: true
       imagePullSecrets:
         - name: ghcr-cred
       # Exclude control-plane nodes: disk-constrained (DiskPressure eviction loop).

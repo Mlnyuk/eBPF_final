@@ -77,7 +77,15 @@ class ModelBundle:
             raise FileNotFoundError(
                 f"model not found at {path}. Run detector/train.py first."
             )
-        return joblib.load(path)
+        bundle = joblib.load(path)
+        # Force single-threaded inference. Training may set n_jobs=-1, but at
+        # serving time per-request joblib worker spawning balloons memory under
+        # concurrent load (OOM). Sequential scoring is plenty fast per window.
+        try:
+            bundle.model.n_jobs = 1
+        except Exception:
+            pass
+        return bundle
 
 
 # --------------------------------------------------------------------------

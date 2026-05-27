@@ -23,7 +23,7 @@ spec:
       containers:
         - name: detector
           image: ghcr.io/mlnyuk/ebpf-final-detector:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
               name: http
@@ -48,10 +48,10 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 256Mi
+              memory: 384Mi
             limits:
-              cpu: 500m
-              memory: 512Mi
+              cpu: "1"
+              memory: 1Gi
       volumes:
         - name: config
           configMap:
