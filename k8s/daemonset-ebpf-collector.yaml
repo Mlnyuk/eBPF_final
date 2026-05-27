@@ -27,14 +27,21 @@ spec:
       serviceAccountName: ebpf-collector
       hostPID: true            # see all host processes/cgroups
       hostNetwork: true
-      tolerations:
-        - operator: Exists     # run on every node, including control-plane
+      imagePullSecrets:
+        - name: ghcr-cred
+      # Exclude control-plane nodes: disk-constrained (DiskPressure eviction loop).
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - {key: node-role.kubernetes.io/control-plane, operator: DoesNotExist}
       containers:
         - name: collector
-          # TODO: replace with your registry image, built from docker/Dockerfile.collector
           image: ghcr.io/mlnyuk/ebpf-final-collector:latest
-          imagePullPolicy: IfNotPresent
-          args: ["--window", "10", "--out", "/data", "--format", "both"]
+          imagePullPolicy: Always
+          args: ["--window", "10", "--out", "/data", "--format", "both",
+                 "--push-url", "http://ebpf-detector.ebpf-final:8080"]
           securityContext:
             privileged: true
           env:
@@ -62,9 +69,11 @@ spec:
             requests:
               cpu: 100m
               memory: 128Mi
+              ephemeral-storage: 256Mi
             limits:
               cpu: 500m
               memory: 512Mi
+              ephemeral-storage: 512Mi
       volumes:
         - name: config
           configMap:

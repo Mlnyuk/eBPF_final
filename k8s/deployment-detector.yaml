@@ -18,9 +18,10 @@ spec:
         app: ebpf-detector
     spec:
       serviceAccountName: ebpf-detector
+      imagePullSecrets:
+        - name: ghcr-cred
       containers:
         - name: detector
-          # TODO: replace with your registry image, built from docker/Dockerfile.detector
           image: ghcr.io/mlnyuk/ebpf-final-detector:latest
           imagePullPolicy: IfNotPresent
           ports:

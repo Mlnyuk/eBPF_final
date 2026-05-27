@@ -1,0 +1,79 @@
+# ============================================================================
+# In-cluster image build with kaniko — no local docker required.
+#
+# kaniko clones the public repo as build context, builds each Dockerfile, and
+# pushes to GHCR. Requires a docker-registry secret named `ghcr-cred` in the
+# ebpf-final namespace (see README / the create-secret command).
+#
+#   kubectl apply -f k8s/kaniko-build.yaml
+#   kubectl -n ebpf-final logs -f job/kaniko-detector
+#   kubectl -n ebpf-final logs -f job/kaniko-collector
+# ============================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kaniko-detector
+  namespace: ebpf-final
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      # control-plane is disk-constrained; build on a roomier node.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - {key: node-role.kubernetes.io/control-plane, operator: DoesNotExist}
+      containers:
+        - name: kaniko
+          image: gcr.io/kaniko-project/executor:latest
+          args:
+            - "--context=git://github.com/Mlnyuk/eBPF_final.git#refs/heads/main"
+            - "--dockerfile=docker/Dockerfile.detector"
+            - "--destination=ghcr.io/mlnyuk/ebpf-final-detector:latest"
+            - "--cache=true"
+          volumeMounts:
+            - {name: docker-config, mountPath: /kaniko/.docker}
+      volumes:
+        - name: docker-config
+          secret:
+            secretName: ghcr-cred
+            items:
+              - {key: .dockerconfigjson, path: config.json}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kaniko-collector
+  namespace: ebpf-final
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - {key: node-role.kubernetes.io/control-plane, operator: DoesNotExist}
+      containers:
+        - name: kaniko
+          image: gcr.io/kaniko-project/executor:latest
+          args:
+            - "--context=git://github.com/Mlnyuk/eBPF_final.git#refs/heads/main"
+            - "--dockerfile=docker/Dockerfile.collector"
+            - "--destination=ghcr.io/mlnyuk/ebpf-final-collector:latest"
+            - "--cache=true"
+          volumeMounts:
+            - {name: docker-config, mountPath: /kaniko/.docker}
+      volumes:
+        - name: docker-config
+          secret:
+            secretName: ghcr-cred
+            items:
+              - {key: .dockerconfigjson, path: config.json}
