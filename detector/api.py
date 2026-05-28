@@ -154,7 +154,7 @@ def _startup() -> None:
 
 
 @app.get("/health")
-def health() -> dict:
+async def health() -> dict:
     return {
         "status": "ok" if _bundle is not None else "degraded",
         "model_loaded": _bundle is not None,
@@ -197,7 +197,7 @@ def detect_batch(req: BatchRequest) -> dict:
 
 
 @app.get("/metrics", response_class=PlainTextResponse)
-def metrics() -> str:
+async def metrics() -> str:
     return _metrics.render()
 
 
