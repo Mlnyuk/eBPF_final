@@ -185,11 +185,18 @@ def detect(fv: FeatureVector) -> dict:
 
 @app.post("/detect/batch")
 def detect_batch(req: BatchRequest) -> dict:
+    import pandas as pd
     bundle = _require_model()
-    results = []
+    if not req.items:
+        return {"count": 0, "anomalies": 0, "results": []}
+    # Build one DataFrame and score all rows in a single score_samples call.
+    rows = []
     for fv in req.items:
         meta, feats = fv.split()
-        results.append(detect_mod.detect_one(bundle, feats, meta=meta))
+        rows.append({**(meta or {}), **feats})
+    df = pd.DataFrame(rows)
+    result_df = detect_mod.score_frame(bundle, df)
+    results = result_df.to_dict(orient="records")
     scores = [float(r["anomaly_score"]) for r in results]
     n_anom = sum(1 for r in results if r["is_anomaly"])
     _metrics.observe(scores, n_anom)
