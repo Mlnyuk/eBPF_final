@@ -1,0 +1,38 @@
+=== Fault Injection Experiment Results ===
+Timestamp: Fri May 29 01:09:01 PM UTC 2026
+
+Waiting for fault pods to exercise (~3 min)...
+
+=== Final Pod Status ===
+fault-cpu-stress      0/1   Completed   0     7m9s
+fault-disk-stress     0/1   Completed   0     7m7s
+fault-fork-bomb       0/1   Completed   0     7m8s
+fault-network-flood   0/1   Completed   0     7m6s
+fault-syscall-flood   0/1   Completed   0     7m5s
+
+=== Detector Metrics ===
+# HELP ebpf_anomaly_scored_total Total feature vectors scored.
+# TYPE ebpf_anomaly_scored_total counter
+ebpf_anomaly_scored_total 15858
+# HELP ebpf_anomaly_detected_total Total vectors flagged anomalous.
+# TYPE ebpf_anomaly_detected_total counter
+ebpf_anomaly_detected_total 122
+# HELP ebpf_anomaly_score_last Most recent anomaly score (0..1).
+# TYPE ebpf_anomaly_score_last gauge
+ebpf_anomaly_score_last 0.000361
+# HELP ebpf_anomaly_score_max Max anomaly score observed since start.
+# TYPE ebpf_anomaly_score_max gauge
+ebpf_anomaly_score_max 1.0
+
+
+=== Per-Node Anomaly Window Counts ===
+  worker-1: windows=25  anomaly_windows=1
+  worker-2: windows=25  anomaly_windows=0
+  worker-3: windows=25  anomaly_windows=30
+  infra-1: windows=25  anomaly_windows=0
+  infra-2: windows=25  anomaly_windows=0
+
+=== Detector CPU/Mem ===
+NAME                             CPU(cores)   MEMORY(bytes)   
+ebpf-detector-64c4475bb6-2hth7   84m          124Mi           
+

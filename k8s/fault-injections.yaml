@@ -1,0 +1,156 @@
+# Fault injection pods for anomaly detection validation.
+# Each pod targets a different feature dimension the Isolation Forest was trained on.
+# Deploy one at a time; let 2-3 windows pass (20-30s); delete.
+#
+# Usage:
+#   kubectl apply -f k8s/fault-injections.yaml
+#   # wait 2-3 windows, then:
+#   kubectl delete -f k8s/fault-injections.yaml
+#
+# Run them individually with -l selectors:
+#   kubectl apply -f k8s/fault-injections.yaml -l fault=cpu-stress
+---
+# 1. CPU stress — elevates context_switch_count, syscall rates
+apiVersion: v1
+kind: Pod
+metadata:
+  name: fault-cpu-stress
+  namespace: ebpf-final
+  labels:
+    app: fault-injection
+    fault: cpu-stress
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: worker-1
+  restartPolicy: Never
+  containers:
+    - name: stressor
+      image: ubuntu:24.04
+      command: ["/bin/bash", "-c"]
+      args:
+        - "apt-get update -qq && apt-get install -y -qq stress-ng &&
+           stress-ng --cpu 4 --io 2 --vm 1 --vm-bytes 128M --timeout 300s"
+      resources:
+        requests: {cpu: 200m, memory: 256Mi}
+        limits:   {cpu: "4",  memory: 512Mi}
+---
+# 2. Fork bomb (safe, capped) — elevates process_fork_count, process_exec_count
+apiVersion: v1
+kind: Pod
+metadata:
+  name: fault-fork-bomb
+  namespace: ebpf-final
+  labels:
+    app: fault-injection
+    fault: fork-bomb
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: worker-2
+  restartPolicy: Never
+  containers:
+    - name: forker
+      image: ubuntu:24.04
+      command: ["/bin/bash", "-c"]
+      # forks 200 subshells per second, each immediately exits; no resource spiral
+      args:
+        - |
+          i=0
+          while [ $i -lt 6000 ]; do
+            (exit 0) &
+            i=$((i+1))
+            # brief pause every 100 forks to stay bounded
+            [ $((i % 100)) -eq 0 ] && sleep 0.05
+          done
+          wait
+      resources:
+        requests: {cpu: 100m, memory: 64Mi}
+        limits:   {cpu: "2",  memory: 256Mi}
+---
+# 3. Disk I/O stress — elevates disk_read_bytes, disk_write_bytes, disk_io_latency_ms
+apiVersion: v1
+kind: Pod
+metadata:
+  name: fault-disk-stress
+  namespace: ebpf-final
+  labels:
+    app: fault-injection
+    fault: disk-stress
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: worker-3
+  restartPolicy: Never
+  containers:
+    - name: disk-io
+      image: ubuntu:24.04
+      command: ["/bin/bash", "-c"]
+      args:
+        - "apt-get update -qq && apt-get install -y -qq fio &&
+           fio --name=randwrite --rw=randrw --bs=4k --size=256m
+               --numjobs=4 --iodepth=32 --runtime=300 --time_based
+               --directory=/tmp --output-format=terse"
+      resources:
+        requests: {cpu: 100m, memory: 64Mi, ephemeral-storage: 2Gi}
+        limits:   {cpu: "2",  memory: 256Mi, ephemeral-storage: 2Gi}
+---
+# 4. Network flood — elevates tcp_connect_rate, network_tx_bytes, tcp_retransmit_rate
+apiVersion: v1
+kind: Pod
+metadata:
+  name: fault-network-flood
+  namespace: ebpf-final
+  labels:
+    app: fault-injection
+    fault: network-flood
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: infra-1
+  restartPolicy: Never
+  containers:
+    - name: flooder
+      image: ubuntu:24.04
+      command: ["/bin/bash", "-c"]
+      # Rapid TCP connects to a cluster service; most succeed, driving connect_rate up.
+      # Target the detector itself so requests are real (some will get 503 if model busy).
+      args:
+        - |
+          apt-get update -qq && apt-get install -y -qq curl iproute2
+          for i in $(seq 1 3000); do
+            curl -s --max-time 1 http://ebpf-detector.ebpf-final:8080/health -o /dev/null &
+            [ $((i % 50)) -eq 0 ] && sleep 0.1 && wait
+          done
+          wait
+      resources:
+        requests: {cpu: 100m, memory: 64Mi}
+        limits:   {cpu: "1",  memory: 128Mi}
+---
+# 5. Memory + syscall pressure — elevates syscall_read_rate, syscall_write_rate
+apiVersion: v1
+kind: Pod
+metadata:
+  name: fault-syscall-flood
+  namespace: ebpf-final
+  labels:
+    app: fault-injection
+    fault: syscall-flood
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: infra-2
+  restartPolicy: Never
+  containers:
+    - name: syscaller
+      image: ubuntu:24.04
+      command: ["/bin/bash", "-c"]
+      # Rapid file open/read/write: drives syscall_open_rate, read_rate, write_rate
+      args:
+        - |
+          mkdir -p /tmp/flood
+          i=0
+          while [ $i -lt 10000 ]; do
+            f="/tmp/flood/f$((i % 100))"
+            echo "$i" > "$f"
+            cat "$f" > /dev/null
+            i=$((i+1))
+          done
+      resources:
+        requests: {cpu: 100m, memory: 64Mi}
+        limits:   {cpu: "1",  memory: 128Mi}
