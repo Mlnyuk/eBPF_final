@@ -5,7 +5,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -43,13 +42,19 @@ func main() {
 		log.Fatalf("remove memlock: %v", err)
 	}
 
-	var objs collectorObjects
-	if err := loadCollectorObjects(&objs, nil); err != nil {
-		log.Fatalf("load BPF objects: %v", err)
+	// Load the CO-RE spec and instantiate. Indexing programs/maps by their C
+	// names avoids depending on bpf2go's generated Go field naming.
+	spec, err := loadCollector()
+	if err != nil {
+		log.Fatalf("load BPF spec: %v", err)
 	}
-	defer objs.Close()
+	coll, err := ebpf.NewCollection(spec)
+	if err != nil {
+		log.Fatalf("new BPF collection: %v", err)
+	}
+	defer coll.Close()
 
-	links := attachAll(&objs)
+	links := attachAll(coll)
 	for _, l := range links {
 		defer l.Close()
 	}
@@ -59,7 +64,6 @@ func main() {
 	if os.Getenv("ENABLE_K8S_MAPPING") != "false" {
 		mapper = NewMapper(node)
 	}
-
 	out := NewWriter(*outDir, *format, node, *pushURL, mapper)
 
 	stop := make(chan os.Signal, 1)
@@ -73,24 +77,31 @@ func main() {
 			log.Printf("[collector-go] shutting down")
 			return
 		case <-ticker.C:
-			perCg := drain(&objs, float64(*window))
+			perCg := drain(coll, float64(*window))
 			out.Emit(perCg)
 		}
 	}
 }
 
-// attachAll links every program to its hook; fatal on the first failure.
-func attachAll(o *collectorObjects) []link.Link {
+// attachAll links every program (looked up by C name) to its hook.
+func attachAll(coll *ebpf.Collection) []link.Link {
 	var links []link.Link
-	tp := func(group, name string, prog *ebpf.Program) {
-		l, err := link.Tracepoint(group, name, prog, nil)
+	prog := func(name string) *ebpf.Program {
+		p := coll.Programs[name]
+		if p == nil {
+			log.Fatalf("program %q not found in collection", name)
+		}
+		return p
+	}
+	tp := func(group, name, progName string) {
+		l, err := link.Tracepoint(group, name, prog(progName), nil)
 		if err != nil {
 			log.Fatalf("attach tracepoint %s/%s: %v", group, name, err)
 		}
 		links = append(links, l)
 	}
-	kp := func(sym string, prog *ebpf.Program) {
-		l, err := link.Kprobe(sym, prog, nil)
+	kp := func(sym, progName string) {
+		l, err := link.Kprobe(sym, prog(progName), nil)
 		if err != nil {
 			log.Printf("[warn] attach kprobe %s failed (skipping): %v", sym, err)
 			return
@@ -98,21 +109,21 @@ func attachAll(o *collectorObjects) []link.Link {
 		links = append(links, l)
 	}
 
-	tp("syscalls", "sys_enter_read", o.TpRead)
-	tp("syscalls", "sys_enter_write", o.TpWrite)
-	tp("syscalls", "sys_enter_open", o.TpOpen)
-	tp("syscalls", "sys_enter_openat", o.TpOpenat)
-	tp("sched", "sched_process_exec", o.TpExec)
-	tp("sched", "sched_process_fork", o.TpFork)
-	tp("sched", "sched_switch", o.TpSwitch)
-	tp("block", "block_rq_issue", o.TpBlockIssue)
-	tp("block", "block_rq_complete", o.TpBlockComplete)
+	tp("syscalls", "sys_enter_read", "tp_read")
+	tp("syscalls", "sys_enter_write", "tp_write")
+	tp("syscalls", "sys_enter_open", "tp_open")
+	tp("syscalls", "sys_enter_openat", "tp_openat")
+	tp("sched", "sched_process_exec", "tp_exec")
+	tp("sched", "sched_process_fork", "tp_fork")
+	tp("sched", "sched_switch", "tp_switch")
+	tp("block", "block_rq_issue", "tp_block_issue")
+	tp("block", "block_rq_complete", "tp_block_complete")
 
-	kp("tcp_v4_connect", o.KTcpV4Connect)
-	kp("tcp_v6_connect", o.KTcpV6Connect)
-	kp("tcp_retransmit_skb", o.KTcpRetransmitSkb)
-	kp("tcp_sendmsg", o.KTcpSendmsg)
-	kp("tcp_cleanup_rbuf", o.KTcpCleanupRbuf)
+	kp("tcp_v4_connect", "k_tcp_v4_connect")
+	kp("tcp_v6_connect", "k_tcp_v6_connect")
+	kp("tcp_retransmit_skb", "k_tcp_retransmit_skb")
+	kp("tcp_sendmsg", "k_tcp_sendmsg")
+	kp("tcp_cleanup_rbuf", "k_tcp_cleanup_rbuf")
 	return links
 }
 
@@ -120,6 +131,9 @@ func attachAll(o *collectorObjects) []link.Link {
 // snapshot. Deletion gives per-window deltas (the BCC version did table.clear()).
 func drainMap(m *ebpf.Map) map[uint64]uint64 {
 	res := make(map[uint64]uint64)
+	if m == nil {
+		return res
+	}
 	var k, v uint64
 	it := m.Iterate()
 	var keys []uint64
@@ -127,14 +141,14 @@ func drainMap(m *ebpf.Map) map[uint64]uint64 {
 		res[k] = v
 		keys = append(keys, k)
 	}
-	for _, key := range keys {
-		_ = m.Delete(&key)
+	for i := range keys {
+		_ = m.Delete(&keys[i])
 	}
 	return res
 }
 
 // drain converts all BPF maps into per-cgroup feature dicts for this window.
-func drain(o *collectorObjects, window float64) map[uint64]map[string]float64 {
+func drain(coll *ebpf.Collection, window float64) map[uint64]map[string]float64 {
 	per := make(map[uint64]map[string]float64)
 	get := func(cg uint64) map[string]float64 {
 		if per[cg] == nil {
@@ -142,39 +156,32 @@ func drain(o *collectorObjects, window float64) map[uint64]map[string]float64 {
 		}
 		return per[cg]
 	}
+	M := func(name string) *ebpf.Map { return coll.Maps[name] }
 
-	// rate maps: value / window
-	rate := []struct {
-		m    *ebpf.Map
-		feat string
-	}{
-		{o.CRead, "syscall_read_rate"}, {o.CWrite, "syscall_write_rate"},
-		{o.COpen, "syscall_open_rate"}, {o.CTcpconn, "tcp_connect_rate"},
-		{o.CTcpretx, "tcp_retransmit_rate"},
+	rate := []struct{ name, feat string }{
+		{"c_read", "syscall_read_rate"}, {"c_write", "syscall_write_rate"},
+		{"c_open", "syscall_open_rate"}, {"c_tcpconn", "tcp_connect_rate"},
+		{"c_tcpretx", "tcp_retransmit_rate"},
 	}
 	for _, r := range rate {
-		for cg, val := range drainMap(r.m) {
+		for cg, val := range drainMap(M(r.name)) {
 			get(cg)[r.feat] = float64(val) / window
 		}
 	}
-	// sum maps: raw value
-	sum := []struct {
-		m    *ebpf.Map
-		feat string
-	}{
-		{o.CNetrx, "network_rx_bytes"}, {o.CNettx, "network_tx_bytes"},
-		{o.CDiskr, "disk_read_bytes"}, {o.CDiskw, "disk_write_bytes"},
-		{o.CExec, "process_exec_count"}, {o.CFork, "process_fork_count"},
-		{o.CCtxsw, "context_switch_count"},
+	sum := []struct{ name, feat string }{
+		{"c_netrx", "network_rx_bytes"}, {"c_nettx", "network_tx_bytes"},
+		{"c_diskr", "disk_read_bytes"}, {"c_diskw", "disk_write_bytes"},
+		{"c_exec", "process_exec_count"}, {"c_fork", "process_fork_count"},
+		{"c_ctxsw", "context_switch_count"},
 	}
 	for _, s := range sum {
-		for cg, val := range drainMap(s.m) {
+		for cg, val := range drainMap(M(s.name)) {
 			get(cg)[s.feat] = float64(val)
 		}
 	}
 	// disk latency = total_ns / io_count / 1e6 (ms)
-	lat := drainMap(o.CDisklat)
-	cnt := drainMap(o.CDiskio)
+	lat := drainMap(M("c_disklat"))
+	cnt := drainMap(M("c_diskio"))
 	for cg, totalNs := range lat {
 		n := cnt[cg]
 		ms := 0.0
@@ -185,11 +192,8 @@ func drain(o *collectorObjects, window float64) map[uint64]map[string]float64 {
 	}
 	// cpu_utilization = on-CPU ns / wall-clock ns
 	windowNs := window * 1e9
-	for cg, ns := range drainMap(o.CCpu) {
+	for cg, ns := range drainMap(M("c_cpu")) {
 		get(cg)["cpu_utilization"] = float64(ns) / windowNs
 	}
 	return per
 }
-
-// keep fmt imported for potential debug builds
-var _ = fmt.Sprintf
