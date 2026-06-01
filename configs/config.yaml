@@ -49,6 +49,10 @@ detector:
   # Decision threshold on the normalized anomaly_score (0..1, higher = more anomalous).
   # If null, fall back to the model's own contamination-based offset.
   score_threshold: null
+  # Hybrid z-tail side-rule: flag if any feature exceeds this many std-devs from
+  # the train mean. Catches single-axis anomalies IsolationForest misses
+  # (cpu-stress, fork-bomb). Normal traffic max-z ~7; faults >200.
+  sigma_threshold: 10.0
   host: 0.0.0.0
   port: 8080
 

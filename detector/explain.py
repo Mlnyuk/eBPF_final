@@ -47,7 +47,6 @@ def _read_labeled(path: Path, feature_order: List[str]) -> pd.DataFrame:
 
 def main() -> None:
     cfg = load_config()
-    feature_order = get_feature_order(cfg)
     model_path = cfg.get("model", {}).get("path", "models/isolation_forest.pkl")
 
     ap = argparse.ArgumentParser()
@@ -66,6 +65,7 @@ def main() -> None:
                          "(--break-system-packages inside the pod)")
 
     bundle = ModelBundle.load(args.model)
+    feature_order = bundle.feature_order  # match the model's trained schema
     explainer = shap.TreeExplainer(bundle.model)
 
     def shap_table(df: pd.DataFrame, tag: str) -> dict:

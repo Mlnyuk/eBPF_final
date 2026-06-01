@@ -63,6 +63,11 @@ class ModelBundle:
     contamination: float
     # normalized-score threshold above which a sample is flagged anomalous.
     score_threshold: float
+    # Hybrid side-rule: also flag if ANY feature deviates more than this many
+    # std-devs from the training mean. IsolationForest under-weights single-axis
+    # anomalies (e.g. cpu-stress: cpu_utilization 210σ but scored normal because
+    # 13/14 features look idle). The z-tail rule covers that blind spot.
+    sigma_threshold: float = 10.0
     metadata: dict = field(default_factory=dict)
 
     def save(self, path: str | os.PathLike) -> None:

@@ -1,0 +1,14 @@
+2026-06-01T03:53:20Z,worker-1,ebpf-final,fault-cpu-stress,stressor,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,251.0,4.0642878484,cpu-stress
+2026-06-01T03:53:30Z,worker-1,ebpf-final,fault-cpu-stress,stressor,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,234.0,3.9779088979,cpu-stress
+2026-06-01T03:53:40Z,worker-1,ebpf-final,fault-cpu-stress,stressor,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,236.0,4.251530938,cpu-stress
+2026-06-01T03:53:50Z,worker-1,ebpf-final,fault-cpu-stress,stressor,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,259.0,4.0519321239,cpu-stress
+2026-06-01T03:54:00Z,worker-1,ebpf-final,fault-cpu-stress,stressor,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,291.0,4.0645263209,cpu-stress
+2026-06-01T03:54:11Z,worker-1,ebpf-final,fault-cpu-stress,stressor,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,271.0,4.1295049997,cpu-stress
+2026-06-01T03:54:21Z,worker-1,ebpf-final,fault-cpu-stress,stressor,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,218.0,3.8424275631,cpu-stress
+2026-06-01T03:54:31Z,worker-1,ebpf-final,fault-cpu-stress,stressor,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,242.0,4.1087914341,cpu-stress
+2026-06-01T03:54:41Z,worker-1,ebpf-final,fault-cpu-stress,stressor,0.0,0.0,0.0,0.0,0.1,0.0,0.0,0.0,0.0,0.0,0.0,0.0,244.0,4.2190820499,cpu-stress
+2026-06-01T03:54:51Z,worker-1,ebpf-final,fault-cpu-stress,stressor,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,223.0,4.0121902446,cpu-stress
+2026-06-01T03:55:02Z,worker-1,ebpf-final,fault-cpu-stress,stressor,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,217.0,3.9964503447,cpu-stress
+2026-06-01T03:55:12Z,worker-1,ebpf-final,fault-cpu-stress,stressor,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,239.0,4.1249612433,cpu-stress
+2026-06-01T03:55:22Z,worker-1,ebpf-final,fault-cpu-stress,stressor,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,247.0,4.0881774867,cpu-stress
+2026-06-01T03:55:32Z,worker-1,ebpf-final,fault-cpu-stress,stressor,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,268.0,3.9289249644,cpu-stress

@@ -70,6 +70,11 @@ def main() -> None:
     ap.add_argument("--threshold", type=float, default=dcfg.get("score_threshold"),
                     help="normalized score threshold (0..1). If unset, derived "
                          "from the contamination quantile of training scores.")
+    ap.add_argument("--sigma-threshold", type=float,
+                    default=dcfg.get("sigma_threshold", 10.0),
+                    help="z-tail side-rule: flag if any feature exceeds this many "
+                         "std-devs from the train mean (catches single-axis "
+                         "anomalies IsolationForest misses, e.g. cpu-stress).")
     args = ap.parse_args()
 
     feature_order = get_feature_order(cfg)
@@ -113,6 +118,7 @@ def main() -> None:
         raw_score_max=raw_max,
         contamination=args.contamination,
         score_threshold=threshold,
+        sigma_threshold=args.sigma_threshold,
         metadata={
             "n_train_samples": int(len(X)),
             "train_means": X.mean(axis=0).tolist(),

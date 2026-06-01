@@ -56,7 +56,6 @@ def _read_labeled(path: Path, feature_order: List[str]) -> pd.DataFrame:
 
 def main() -> None:
     cfg = load_config()
-    feature_order = get_feature_order(cfg)
     model_path = cfg.get("model", {}).get("path", "models/isolation_forest.pkl")
 
     ap = argparse.ArgumentParser()
@@ -68,6 +67,9 @@ def main() -> None:
     args = ap.parse_args()
 
     bundle = ModelBundle.load(args.model)
+    # Use the model's own feature order (not config) so eval matches what the
+    # model was trained on, even if config.yaml is a different schema version.
+    feature_order = bundle.feature_order
 
     # expand globs
     fault_paths: List[Path] = []
