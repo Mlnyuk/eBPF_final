@@ -1,0 +1,67 @@
+# CO-RE (Go + libbpf) collector DaemonSet.
+#
+# Unlike the BCC DaemonSet this needs NO /lib/modules or /usr/src host mounts and
+# no clang/LLVM in the image — the BPF object was compiled once at build time and
+# CO-RE-relocates against the running kernel's BTF. Only /sys is mounted (cgroupfs
+# for pod mapping, tracefs/bpf for attach).
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: ebpf-collector-go
+  namespace: ebpf-final
+  labels:
+    app: ebpf-collector-go
+spec:
+  selector:
+    matchLabels:
+      app: ebpf-collector-go
+  template:
+    metadata:
+      labels:
+        app: ebpf-collector-go
+    spec:
+      serviceAccountName: ebpf-collector
+      hostPID: true
+      imagePullSecrets:
+        - name: ghcr-cred
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - {key: node-role.kubernetes.io/control-plane, operator: DoesNotExist}
+      containers:
+        - name: collector
+          image: ghcr.io/mlnyuk/ebpf-final-collector-go:latest
+          imagePullPolicy: Always
+          args: ["-window", "10", "-out", "/data", "-format", "both",
+                 "-push-url", "http://ebpf-detector.ebpf-final:8080"]
+          securityContext:
+            privileged: true
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: ENABLE_K8S_MAPPING
+              value: "true"
+          volumeMounts:
+            - name: sys
+              mountPath: /sys
+              readOnly: false
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+              ephemeral-storage: 256Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+              ephemeral-storage: 512Mi
+      volumes:
+        - name: sys
+          hostPath: {path: /sys}
+        - name: data
+          emptyDir: {}

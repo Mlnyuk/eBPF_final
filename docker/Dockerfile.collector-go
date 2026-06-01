@@ -1,0 +1,22 @@
+# CO-RE collector image. Build stage compiles the BPF object ONCE with clang and
+# builds a static Go binary; the runtime stage is distroless (no clang/LLVM/kernel
+# headers) — the whole point of the Go + libbpf CO-RE migration.
+FROM golang:1.22-bookworm AS build
+
+# clang/llvm compile the BPF C; libbpf-dev provides bpf/bpf_helpers.h etc.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        clang llvm libbpf-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY collector-go/ ./
+
+# Resolve deps, codegen BPF bindings (bpf2go -> .o + *_bpfel.go), build static bin.
+RUN go mod tidy
+RUN go generate ./...
+RUN go mod tidy
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /collector .
+
+FROM gcr.io/distroless/static-debian12
+COPY --from=build /collector /collector
+ENTRYPOINT ["/collector"]
