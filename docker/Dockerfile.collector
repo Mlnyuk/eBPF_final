@@ -8,13 +8,13 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1
 
 # BCC toolchain + python bindings + python deps for feature output.
+# python3-kubernetes (apt) provides the cgroup->pod enrichment client; installing
+# it via apt is more reliable in-cluster than pip --break-system-packages.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bpfcc-tools python3-bpfcc python3-pip python3-yaml \
+        python3-kubernetes \
         libbpfcc linux-headers-generic ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-
-# k8s python client for cgroup->pod enrichment (optional at runtime).
-RUN pip3 install --no-cache-dir --break-system-packages kubernetes || true
 
 WORKDIR /app
 COPY configs/ ./configs/
