@@ -1,0 +1,11 @@
+# Analysis / reporting dependencies (NOT shipped in the detector image).
+# Used by detector/explain.py (SHAP attribution) and detector/threshold_tune.py.
+# The live API path stays lean (see requirements.txt); these are heavyweight and
+# only needed offline for evaluation and reports.
+#
+# Install in a venv or inside the running detector pod:
+#   pip install --break-system-packages -r requirements-analysis.txt
+shap>=0.44
+# threshold_tune.py only needs sklearn/numpy/pandas (already in requirements.txt).
+# matplotlib is optional — roc_pr_points.csv can be plotted anywhere.
+matplotlib>=3.7

@@ -1,0 +1,29 @@
+=== Isolation Forest threshold tuning ===
+negatives(normal)=4124  positives(fault)=113
+ROC AUC = 0.7330
+PR  AUC (avg precision) = 0.4504
+
+[current(model)] thr=0.6230  TPR(recall)=0.522  FPR=0.013  precision=0.518  (TP=59 FN=54 FP=55 TN=4069)
+[Youden-J] thr=0.3309  TPR(recall)=0.752  FPR=0.091  precision=0.184  (TP=85 FN=28 FP=376 TN=3748)
+[max-F1] thr=0.6596  TPR(recall)=0.522  FPR=0.007  precision=0.678  (TP=59 FN=54 FP=28 TN=4096)
+max F1 = 0.5900 @ thr=0.6596
+
+=== Per-fault detection rate (recall) ===
+  @ current (thr=0.6230):
+      cpu-stress       recall=0.000  (n=27)
+      disk-stress      recall=1.000  (n=26)
+      fork-bomb        recall=0.000  (n=25)
+      network-flood    recall=1.000  (n=26)
+      syscall-flood    recall=0.778  (n=9)
+  @ Youden-J (thr=0.3309):
+      cpu-stress       recall=0.000  (n=27)
+      disk-stress      recall=1.000  (n=26)
+      fork-bomb        recall=1.000  (n=25)
+      network-flood    recall=1.000  (n=26)
+      syscall-flood    recall=0.889  (n=9)
+  @ max-F1 (thr=0.6596):
+      cpu-stress       recall=0.000  (n=27)
+      disk-stress      recall=1.000  (n=26)
+      fork-bomb        recall=0.000  (n=25)
+      network-flood    recall=1.000  (n=26)
+      syscall-flood    recall=0.778  (n=9)

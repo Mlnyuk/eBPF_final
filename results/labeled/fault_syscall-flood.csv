@@ -1,0 +1,9 @@
+2026-06-01T01:05:27Z,infra-2,ebpf-final,fault-syscall-flood,syscaller,4798.7,976.0,10308.9,0.0,0.0,0.0,0.0,450560.0,176619520.0,58.21495480053908,0.0,0.0,12549.0,syscall-flood
+2026-06-01T01:05:38Z,infra-2,ebpf-final,fault-syscall-flood,syscaller,5155.0,975.4,12863.4,0.0,0.0,0.0,0.0,454656.0,105381888.0,64.71324365163935,0.0,0.0,8465.0,syscall-flood
+2026-06-01T01:05:48Z,infra-2,ebpf-final,fault-syscall-flood,syscaller,1494.7,1093.6,3589.5,0.0,0.0,0.0,0.0,77824.0,151756800.0,64.14091662662338,0.0,0.0,7085.0,syscall-flood
+2026-06-01T01:05:58Z,infra-2,ebpf-final,fault-syscall-flood,syscaller,6551.3,960.2,16024.0,0.0,0.0,0.0,0.0,204800.0,158220288.0,54.60458218397626,0.0,0.0,8574.0,syscall-flood
+2026-06-01T01:06:08Z,infra-2,ebpf-final,fault-syscall-flood,syscaller,7099.1,874.8,17655.1,0.0,0.0,0.0,0.0,1802240.0,146702336.0,46.86962149870801,0.0,0.0,8219.0,syscall-flood
+2026-06-01T01:06:18Z,infra-2,ebpf-final,fault-syscall-flood,syscaller,2432.6,794.6,5870.6,0.0,0.0,0.0,0.0,9515008.0,31870976.0,46.56147976708075,0.0,0.0,12204.0,syscall-flood
+2026-06-01T01:06:28Z,infra-2,ebpf-final,fault-syscall-flood,syscaller,1030.9,454.3,2524.0,0.0,0.0,0.0,0.0,17809408.0,15155200.0,19.446551257201644,0.0,0.0,16949.0,syscall-flood
+2026-06-01T01:06:39Z,infra-2,ebpf-final,fault-syscall-flood,syscaller,0.0,0.0,0.0,0.0,0.0,0.0,0.0,29179904.0,0.0,18.55673744827586,0.0,0.0,2893.0,syscall-flood
+2026-06-01T01:06:39Z,infra-2,ebpf-final,fault-syscall-flood,a727a0bdda49,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,2.0,syscall-flood

@@ -1,0 +1,39 @@
+[00:57:23] === Fault experiment v2 — 20260601_005723 ===
+[00:57:23] Launching all 5 fault pods (continuous 300s)...
+[00:57:25] Waiting 320s for faults to run...
+[01:02:45] Capture window: 2026-06-01T00:58:23Z .. 2026-06-01T01:02:45Z
+[01:02:45] 
+[01:02:45] === Per-fault labeled capture ===
+[01:02:46]   cpu-stress (worker-1): captured 27 rows -> labeled/fault_cpu-stress.csv
+[01:02:47]   fork-bomb (worker-2): captured 25 rows -> labeled/fault_fork-bomb.csv
+[01:02:47]   disk-stress (worker-3): captured 26 rows -> labeled/fault_disk-stress.csv
+[01:02:48]   network-flood (infra-1): captured 26 rows -> labeled/fault_network-flood.csv
+[01:02:48]   syscall-flood (infra-2): captured 2 rows -> labeled/fault_syscall-flood.csv
+[01:02:48] 
+[01:02:48] === Normal sample capture (same window, non-fault pods) ===
+[01:02:51]   normal: captured 4124 rows -> labeled/normal_sample.csv
+[01:02:51] 
+[01:02:51] === Detector metrics ===
+# HELP ebpf_anomaly_scored_total Total feature vectors scored.
+# TYPE ebpf_anomaly_scored_total counter
+ebpf_anomaly_scored_total 6105186
+# HELP ebpf_anomaly_detected_total Total vectors flagged anomalous.
+# TYPE ebpf_anomaly_detected_total counter
+ebpf_anomaly_detected_total 10621
+# HELP ebpf_anomaly_score_last Most recent anomaly score (0..1).
+# TYPE ebpf_anomaly_score_last gauge
+ebpf_anomaly_score_last 0.000361
+# HELP ebpf_anomaly_score_max Max anomaly score observed since start.
+# TYPE ebpf_anomaly_score_max gauge
+ebpf_anomaly_score_max 1.0
+
+[01:02:52] 
+[01:02:52] === Per-node anomaly windows during fault ===
+[01:02:52]   cpu-stress (worker-1): windows=31 anomaly_count=4
+[01:02:53]   fork-bomb (worker-2): windows=31 anomaly_count=29
+[01:02:54]   disk-stress (worker-3): windows=32 anomaly_count=63
+[01:02:55]   network-flood (infra-1): windows=31 anomaly_count=34
+[01:02:55]   syscall-flood (infra-2): windows=32 anomaly_count=17
+[01:02:55] 
+[01:02:55] Cleaning up fault pods...
+[01:02:58] === Done. Report: /root/eBPF_final/results/fault_experiment_v2_20260601_005723.txt ===
