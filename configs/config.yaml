@@ -26,6 +26,7 @@ features:
   - process_exec_count
   - process_fork_count
   - context_switch_count
+  - cpu_utilization
 
 # Identity / metadata columns (not used as model features).
 metadata_columns:

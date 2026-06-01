@@ -74,6 +74,10 @@ BPF_HASH(c_diskio,  u64, u64);   // completed io count
 BPF_HASH(c_exec,    u64, u64);
 BPF_HASH(c_fork,    u64, u64);
 BPF_HASH(c_ctxsw,   u64, u64);
+BPF_HASH(c_cpu,     u64, u64);   // per-cgroup on-CPU time (ns)
+
+// per-CPU timestamp of the last sched_switch, keyed by logical CPU id.
+BPF_HASH(cpu_last,  u32, u64);
 
 // disk in-flight start times, keyed by sector (best-effort matching)
 BPF_HASH(disk_start, u64, u64);
@@ -114,10 +118,22 @@ TRACEPOINT_PROBE(sched, sched_process_fork) {
     return 0;
 }
 
-// ---- context switch -----------------------------------------------------
+// ---- context switch + on-CPU time ---------------------------------------
+// At sched_switch the outgoing task is still `current`, so its cgroup gets
+// credited with the time elapsed since this CPU's previous switch = how long
+// it just ran on-CPU. This makes pure-compute (no-syscall) load observable.
 TRACEPOINT_PROBE(sched, sched_switch) {
     u64 cg = bpf_get_current_cgroup_id();
     c_ctxsw.increment(cg);
+
+    u32 cpu = bpf_get_smp_processor_id();
+    u64 now = bpf_ktime_get_ns();
+    u64 *last = cpu_last.lookup(&cpu);
+    if (last) {
+        u64 delta = now - *last;
+        c_cpu.increment(cg, delta);   // credit outgoing (current) cgroup
+    }
+    cpu_last.update(&cpu, &now);
     return 0;
 }
 
@@ -251,6 +267,14 @@ class EbpfCollector:
             n = cnt.get(cg, 0.0)
             ms = (total_ns / n / 1e6) if n > 0 else 0.0
             per_cg.setdefault(cg, {})["disk_io_latency_ms"] = ms
+
+        # cpu_utilization = on-CPU ns / wall-clock ns this window.
+        # Fraction of ONE core; a pod pegging 3 cores reads ~3.0.
+        window_ns = float(self.window) * 1e9
+        cpu = {int(k.value): float(v.value) for k, v in self.bpf["c_cpu"].items()}
+        self.bpf["c_cpu"].clear()
+        for cg, ns in cpu.items():
+            per_cg.setdefault(cg, {})["cpu_utilization"] = ns / window_ns
         return per_cg
 
     def _to_records(self, per_cg: Dict[int, Dict[str, float]]):

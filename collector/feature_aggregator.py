@@ -50,6 +50,7 @@ FEATURE_COLUMNS: List[str] = [
     "process_exec_count",
     "process_fork_count",
     "context_switch_count",
+    "cpu_utilization",   # on-CPU fraction (0..n_cores) from sched_switch runtime
 ]
 
 # Identity columns (not model inputs).
@@ -264,14 +265,14 @@ _NORMAL_MEANS: Dict[str, float] = {
     "process_exec_count": 1.0,
     "process_fork_count": 1.0,
     "context_switch_count": 800.0,
+    "cpu_utilization": 0.05,   # ~5% of one core for an idle-ish pod
 }
 
 # Multiplicative fault profiles: feature -> factor applied to the normal mean.
 _FAULT_PROFILES: Dict[str, Dict[str, float]] = {
     "cpu_stress": {
-        "context_switch_count": 6.0,
-        "syscall_read_rate": 2.0,
-        "process_exec_count": 4.0,
+        "cpu_utilization": 60.0,   # ~3 cores pegged (0.05 -> 3.0)
+        "context_switch_count": 0.1,  # CPU-bound loop yields rarely -> fewer switches
     },
     "network_delay": {
         "tcp_retransmit_rate": 15.0,
