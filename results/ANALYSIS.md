@@ -17,24 +17,24 @@ v1 약점(bash 루프 조기 종료, curl 성공으로 retransmit 0)을 stress-n
 | fork-bomb | worker-2 | process_fork=**18046** (정상 22의 824×), context_switch=37080 |
 | disk-stress | worker-3 | disk_read=**1.20GB**, disk_write=65MB, context_switch=294038 |
 | network-flood | infra-1 | network_rx=**13.7GB**, tx=13.6GB, syscall_open=26104 |
-| syscall-flood | infra-2 | syscall_open=**7648**, disk_write=87MB, disk_io_latency=high |
+| syscall-flood | infra-2 | syscall_open=**5101**, read=3061, write=2039, ctxsw=27989 (순수 syscall) |
 
-## B. 모델 평가 (정상 4124 vs fault 113)
+## B. 모델 평가 (정상 4124 vs fault 119)
 
 ```
-ROC AUC = 0.7330
-PR  AUC = 0.4504
+ROC AUC = 0.7539
+PR  AUC = 0.5129
 ```
 
 ### Threshold 비교
 
 | Threshold | 값 | Recall(TPR) | FPR | Precision |
 |-----------|-----|------|-----|-----------|
-| 현재(모델) | 0.6230 | 0.522 | **0.013** | 0.518 |
-| Youden-J | 0.3309 | **0.752** | 0.091 | 0.184 |
-| max-F1 | 0.6596 | 0.522 | 0.007 | **0.678** |
+| 현재(모델) | 0.6230 | 0.563 | **0.013** | 0.549 |
+| Youden-J | 0.3309 | **0.773** | 0.091 | 0.197 |
+| max-F1 | 0.6596 | 0.563 | 0.007 | **0.705** |
 
-max F1 = 0.59 @ 0.6596
+max F1 = 0.626 @ 0.6596
 
 ### Fault별 탐지율(recall)
 
@@ -42,7 +42,7 @@ max F1 = 0.59 @ 0.6596
 |-------|------|------|------|
 | disk-stress | **1.00** | 1.00 | 완벽 |
 | network-flood | **1.00** | 1.00 | 완벽 |
-| syscall-flood | 0.78 | 0.89 | 양호 |
+| syscall-flood | **1.00** | 1.00 | 완벽 (순수 syscall 신호) |
 | fork-bomb | **0.00** | **1.00** | threshold 민감 (score ~0.4) |
 | cpu-stress | 0.00 | 0.00 | **탐지 불가** |
 
@@ -71,7 +71,7 @@ max F1 = 0.59 @ 0.6596
 | fork-bomb | **process_fork_count (+3.96)**, context_switch (+0.95) |
 | disk-stress | **disk_write_bytes (+3.35)**, disk_read (+2.54), ctxsw (+2.53) |
 | network-flood | **syscall_open_rate (+2.90)**, network_tx (+2.72), rx (+2.67) |
-| syscall-flood | disk_io_latency (+2.23), disk_write (+1.80) |
+| syscall-flood | **syscall_open_rate (+2.07)**, disk_write (+2.14), process_fork (+1.62) |
 | cpu-stress | 전부 음수 (정상 이하) → 탐지 불가 재확인 |
 
 SHAP가 각 fault의 원인 feature를 정확히 지목 → 라이브 API의 z-score proxy보다 해석력 우수.
@@ -89,4 +89,4 @@ SHAP가 각 fault의 원인 feature를 정확히 지목 → 라이브 API의 z-s
 
 - [ ] CPU utilization feature 추가 → cpu-stress 탐지 + 재학습
 - [ ] fork/exec rate 보조 룰 또는 threshold 재보정
-- [ ] syscall-flood 더 깨끗한 데이터 (이번엔 iomix가 disk도 침 → 저메모리 stressor로 교체 완료)
+- [x] syscall-flood 순수 syscall 데이터로 재캡처 (stress-ng OOM → 시간제한 bash 루프, mem~0, recall 0.78→1.00)

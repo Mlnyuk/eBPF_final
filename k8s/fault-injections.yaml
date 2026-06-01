@@ -115,13 +115,23 @@ spec:
     - name: syscaller
       image: ubuntu:24.04
       command: ["/bin/bash", "-c"]
-      # Low-memory syscall hammering: --pipe (read/write on pipes), --open
-      # (open/close), --dup (dup), --null (write /dev/null). No disk buffers, so
-      # it won't OOM like --iomix/--hdd did. Drives read/write/open syscall rates.
+      # Time-bounded bash loop hammering open/write/read syscalls. stress-ng kept
+      # OOMing this node (--pipe/--iomix ballooned past 512Mi); a plain loop uses
+      # near-zero memory and, unlike v1's fixed-iteration loop, runs a full 300s
+      # so it spans many detector windows. No apt install needed.
       args:
-        - "apt-get update -qq && apt-get install -y -qq stress-ng &&
-           stress-ng --pipe 8 --open 8 --dup 4 --null 4
-                     --timeout 300s --metrics-brief"
+        - |
+          mkdir -p /tmp/f
+          end=$(( $(date +%s) + 300 ))
+          while [ "$(date +%s)" -lt "$end" ]; do
+            i=0
+            while [ $i -lt 500 ]; do
+              f=/tmp/f/$((i % 50))
+              echo x > "$f"          # open+write
+              cat "$f" > /dev/null   # open+read
+              i=$((i + 1))
+            done
+          done
       resources:
-        requests: {cpu: 200m, memory: 128Mi}
-        limits:   {cpu: "2",  memory: 384Mi}
+        requests: {cpu: 200m, memory: 64Mi}
+        limits:   {cpu: "2",  memory: 256Mi}

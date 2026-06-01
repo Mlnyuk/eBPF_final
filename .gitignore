@@ -15,6 +15,9 @@ data/*.csv
 data/*.jsonl
 results/*.csv
 results/*.jsonl
+# Intermediate per-node baseline harvest (superseded by results/real_normal_baseline_45m.csv)
+data/real/
+data/real2/
 
 # OS / editor
 .DS_Store
