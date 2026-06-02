@@ -63,5 +63,11 @@ spec:
       volumes:
         - name: sys
           hostPath: {path: /sys}
+        # Node-local persistence: the per-node CSV/JSONL copy survives pod
+        # restarts (DaemonSets can't use PVC templates; hostPath is the
+        # idiomatic node-local store). Primary path is still the push to the
+        # detector; this is the local audit copy.
         - name: data
-          emptyDir: {}
+          hostPath:
+            path: /var/lib/ebpf-collector
+            type: DirectoryOrCreate

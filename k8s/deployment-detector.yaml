@@ -41,9 +41,13 @@ spec:
           env:
             - name: MODEL_PATH
               value: /app/models/isolation_forest.pkl
+            - name: ARCHIVE_DIR
+              value: /archive
           volumeMounts:
             - name: config
               mountPath: /app/configs
+            - name: archive
+              mountPath: /archive
           readinessProbe:
             httpGet:
               path: /health
@@ -67,6 +71,9 @@ spec:
         - name: config
           configMap:
             name: ebpf-final-config
+        - name: archive
+          persistentVolumeClaim:
+            claimName: ebpf-feature-archive
 ---
 # Keep at least one detector serving during voluntary disruptions
 # (node drain, rolling update, autoscaler eviction).

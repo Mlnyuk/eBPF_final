@@ -39,6 +39,7 @@ from pydantic import BaseModel, Field  # noqa: E402
 
 from detector.model_utils import ModelBundle, load_config, get_feature_order  # noqa: E402
 from detector import detect as detect_mod  # noqa: E402
+from detector.archive import FeatureArchive  # noqa: E402
 
 # --------------------------------------------------------------------------
 # Model loading
@@ -103,6 +104,33 @@ class _Metrics:
 
 
 _metrics = _Metrics()
+
+# --------------------------------------------------------------------------
+# Durable feature archive (optional; enabled when ARCHIVE_DIR is set)
+# --------------------------------------------------------------------------
+
+_META_COLS = ["timestamp", "node", "namespace", "pod", "container"]
+_ARCHIVE_COLS = (["ingest_ts"] + _META_COLS + list(_FEATURE_ORDER)
+                 + ["anomaly_score", "is_anomaly", "trigger"])
+_archive = FeatureArchive(os.environ.get("ARCHIVE_DIR", ""), _ARCHIVE_COLS)
+
+
+def _archive_rows(inputs: List[dict], results: List[dict]) -> None:
+    """Merge input feature dicts with their score columns and append to archive.
+    inputs[i] holds meta+features; results[i] holds anomaly_score/is_anomaly/
+    trigger for the same row (index-aligned)."""
+    if not _archive.enabled:
+        return
+    ingest = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    records = []
+    for src, res in zip(inputs, results):
+        records.append({
+            "ingest_ts": ingest, **src,
+            "anomaly_score": res.get("anomaly_score"),
+            "is_anomaly": res.get("is_anomaly"),
+            "trigger": res.get("trigger"),
+        })
+    _archive.append(records)
 
 # --------------------------------------------------------------------------
 # Request / response models
@@ -180,6 +208,7 @@ def detect(fv: FeatureVector) -> dict:
     result = detect_mod.detect_one(bundle, feats, meta=meta)
     _metrics.observe([float(result["anomaly_score"])],
                      1 if result["is_anomaly"] else 0)
+    _archive_rows([{**(meta or {}), **feats}], [result])
     return result
 
 
@@ -200,6 +229,7 @@ def detect_batch(req: BatchRequest) -> dict:
     scores = [float(r["anomaly_score"]) for r in results]
     n_anom = sum(1 for r in results if r["is_anomaly"])
     _metrics.observe(scores, n_anom)
+    _archive_rows(rows, results)
     return {"count": len(results), "anomalies": n_anom, "results": results}
 
 

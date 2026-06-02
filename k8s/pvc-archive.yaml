@@ -1,0 +1,16 @@
+# Durable store for the detector's feature archive. ReadWriteMany so both HA
+# detector replicas can mount it; each replica writes its own per-host daily
+# file (see detector/archive.py), so there is no shared-file write contention.
+# longhorn provides RWX via its share-manager (NFS) — the default SC supports it.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ebpf-feature-archive
+  namespace: ebpf-final
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 10Gi
