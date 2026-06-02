@@ -1,0 +1,33 @@
+# Autoscale the detector on CPU. Load testing (loadtest/RESULTS.md) showed the
+# detector is CPU-bound: each replica pins at its 1-core limit under load, and
+# the 2-replica floor saturates (~24 req/s, p95 -> 10s, timeouts) well above
+# real load but with little burst headroom. HPA scales out on sustained CPU so
+# bursts get more replicas instead of throttling. Floor 2 keeps HA + PDB intact.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ebpf-detector
+  namespace: ebpf-final
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ebpf-detector
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - {type: Pods, value: 2, periodSeconds: 30}
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - {type: Pods, value: 1, periodSeconds: 60}

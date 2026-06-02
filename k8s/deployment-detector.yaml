@@ -66,11 +66,13 @@ spec:
             periodSeconds: 20
           resources:
             requests:
-              cpu: 100m
-              memory: 384Mi
+              # request sized so HPA CPU-utilization (% of request) is meaningful;
+              # load test showed mem peaks ~180Mi, so 1Gi limit was overkill.
+              cpu: 500m
+              memory: 256Mi
             limits:
-              cpu: "1"
-              memory: 1Gi
+              cpu: "2"
+              memory: 512Mi
       volumes:
         - name: config
           configMap:
