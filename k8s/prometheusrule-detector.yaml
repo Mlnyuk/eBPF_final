@@ -1,0 +1,64 @@
+# Alerting rules for the eBPF anomaly detector. Picked up by the
+# prometheus-operator (ruleSelector matchLabels release=my-monitoring).
+# Baseline detected/scored ratio is ~0.1 (contamination 0.02 + sigma side-rule),
+# so the ratio alerts sit well above normal.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ebpf-detector
+  namespace: ebpf-final
+  labels:
+    release: my-monitoring
+spec:
+  groups:
+    - name: ebpf-detector.rules
+      rules:
+        # --- Availability ---
+        - alert: EbpfDetectorReplicaDown
+          expr: up{job="ebpf-detector"} == 0
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Detector replica {{ $labels.pod }} is down"
+            description: "Prometheus cannot scrape detector pod {{ $labels.pod }} for >2m."
+        - alert: EbpfDetectorAllDown
+          expr: count(up{job="ebpf-detector"} == 1) == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "All detector replicas are down"
+            description: "No detector replica is scrapable for >2m — anomaly scoring has stopped cluster-wide."
+
+        # --- Pipeline liveness ---
+        - alert: EbpfPipelineStalled
+          expr: sum(rate(ebpf_anomaly_scored_total[5m])) == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Detection pipeline stalled"
+            description: "No feature vectors scored in 10m — collectors stopped pushing or the detector is wedged."
+
+        # --- Anomaly volume ---
+        - alert: EbpfAnomalyRatioHigh
+          expr: |
+            sum(rate(ebpf_anomaly_detected_total[5m]))
+              / clamp_min(sum(rate(ebpf_anomaly_scored_total[5m])), 1) > 0.25
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Anomaly ratio elevated ({{ $value | humanizePercentage }})"
+            description: "Detected/scored ratio >25% for 10m (baseline ~10%) — possible widespread fault or model drift."
+        - alert: EbpfAnomalyRatioCritical
+          expr: |
+            sum(rate(ebpf_anomaly_detected_total[5m]))
+              / clamp_min(sum(rate(ebpf_anomaly_scored_total[5m])), 1) > 0.5
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Anomaly ratio critical ({{ $value | humanizePercentage }})"
+            description: "Over half of all scored vectors flagged anomalous for 5m — active incident likely."

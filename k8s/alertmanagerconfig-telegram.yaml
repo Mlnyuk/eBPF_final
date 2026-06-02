@@ -1,0 +1,42 @@
+# Routes eBPF detector alerts to a Telegram bot. The operator's
+# alertmanagerConfigSelector/NamespaceSelector are both empty ({}), so this CRD
+# is auto-merged into the running Alertmanager. AlertmanagerConfig auto-scopes
+# its route to this namespace, so only alerts carrying namespace="ebpf-final"
+# (the PrometheusRule alerts) match — cluster default alerts are untouched.
+#
+# Prereqs (do NOT commit secrets):
+#   kubectl -n ebpf-final create secret generic alertmanager-telegram \
+#     --from-literal=token=<BOT_TOKEN>     # via `!` so it isn't logged
+#   chatID below = your Telegram chat/group id (integer; negative for groups)
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: ebpf-telegram
+  namespace: ebpf-final
+spec:
+  route:
+    receiver: telegram
+    groupBy: ["alertname"]
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 4h
+    # Catch both severities; child route lets critical repeat sooner.
+    routes:
+      - receiver: telegram
+        matchers:
+          - name: severity
+            value: critical
+        repeatInterval: 1h
+  receivers:
+    - name: telegram
+      telegramConfigs:
+        - botToken:
+            name: alertmanager-telegram
+            key: token
+          chatID: 8098454352
+          sendResolved: true
+          message: |-
+            {{ range .Alerts }}[{{ .Status | toUpper }}] {{ .Labels.alertname }} ({{ .Labels.severity }})
+            {{ .Annotations.summary }}
+            {{ .Annotations.description }}
+            {{ end }}
