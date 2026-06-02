@@ -59,14 +59,30 @@ def _read_any(path: Path) -> pd.DataFrame:
     return pd.read_csv(path)  # archive CSV has a header
 
 
+def _normal_mask(df: pd.DataFrame) -> pd.Series:
+    """Rows the current model considers normal (is_anomaly == False). Keeps the
+    candidate's baseline stats clean so the z-tail side-rule survives — training
+    on the full archive lets fault rows inflate the per-feature std and silently
+    disables single-axis detection (e.g. cpu-stress)."""
+    if "is_anomaly" not in df.columns:
+        return pd.Series(True, index=df.index)
+    flag = df["is_anomaly"].astype(str).str.lower().isin(["false", "0", "0.0"])
+    return flag
+
+
 def train_candidate(data_paths: List[str], feature_order: List[str],
-                    cfg: dict, time_str: str) -> ModelBundle:
+                    cfg: dict, time_str: str, normal_only: bool = True) -> ModelBundle:
     mcfg = cfg.get("model", {})
     dcfg = cfg.get("detector", {})
     frames = [_read_any(Path(p)) for p in data_paths if Path(p).exists()]
     if not frames:
         raise SystemExit("retrain: no training data found")
     df = pd.concat(frames, ignore_index=True)
+    if normal_only:
+        mask = _normal_mask(df)
+        kept = int(mask.sum())
+        print(f"[retrain] normal-only filter: {kept}/{len(df)} rows kept")
+        df = df[mask].reset_index(drop=True)
     X = frame_to_matrix(df, feature_order)
     if len(X) < 500:
         raise SystemExit(f"retrain: too few training rows ({len(X)}); aborting")
@@ -170,12 +186,15 @@ def main() -> None:
                     help="candidate may be at most this much below current AUC")
     ap.add_argument("--recall-floor", type=float, default=0.80,
                     help="candidate min per-fault recall must be >= this")
+    ap.add_argument("--all-rows", action="store_true",
+                    help="train on every archived row (default: is_anomaly==False only)")
     args = ap.parse_args()
 
     ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     verdict: Dict = {"trained_at": ts}
 
-    cand = train_candidate(args.data, feature_order, cfg, ts)
+    cand = train_candidate(args.data, feature_order, cfg, ts,
+                           normal_only=not args.all_rows)
     cand_eval = evaluate(cand, Path(args.holdout_normal), args.holdout_faults)
     verdict["candidate"] = cand_eval
     verdict["candidate"]["n_train_samples"] = cand.metadata["n_train_samples"]
