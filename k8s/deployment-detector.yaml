@@ -8,7 +8,7 @@ metadata:
   labels:
     app: ebpf-detector
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: ebpf-detector
@@ -20,6 +20,17 @@ spec:
       serviceAccountName: ebpf-detector
       imagePullSecrets:
         - name: ghcr-cred
+      # Spread replicas across nodes so a single node loss never takes the
+      # whole detector down (preferred: still schedules if nodes are scarce).
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: ebpf-detector
+                topologyKey: kubernetes.io/hostname
       containers:
         - name: detector
           image: ghcr.io/mlnyuk/ebpf-final-detector:latest
@@ -56,3 +67,16 @@ spec:
         - name: config
           configMap:
             name: ebpf-final-config
+---
+# Keep at least one detector serving during voluntary disruptions
+# (node drain, rolling update, autoscaler eviction).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ebpf-detector
+  namespace: ebpf-final
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: ebpf-detector
