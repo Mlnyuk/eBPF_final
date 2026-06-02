@@ -1,0 +1,89 @@
+# Drift-adaptation retraining. Daily: aggregate the detector archive corpus,
+# train a candidate model, pass it through a regression gate against the
+# labelled holdout, and hot-swap (+ /reload) only on PASS. Telegram-notifies
+# the verdict. See scripts/retrain_pipeline.sh + detector/retrain.py.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ebpf-retrain
+  namespace: ebpf-final
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ebpf-retrain
+  namespace: ebpf-final
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ebpf-retrain
+  namespace: ebpf-final
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ebpf-retrain
+subjects:
+  - kind: ServiceAccount
+    name: ebpf-retrain
+    namespace: ebpf-final
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ebpf-retrain
+  namespace: ebpf-final
+spec:
+  schedule: "30 3 * * *"          # daily 03:30 UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          serviceAccountName: ebpf-retrain
+          restartPolicy: Never
+          imagePullSecrets:
+            - name: ghcr-cred
+          containers:
+            - name: retrain
+              image: ghcr.io/mlnyuk/ebpf-final-retrain:latest
+              imagePullPolicy: Always
+              env:
+                - name: NAMESPACE
+                  value: ebpf-final
+                - name: TELEGRAM_CHAT_ID
+                  value: "8098454352"
+                - name: AUC_TOL
+                  value: "0.02"
+                - name: RECALL_FLOOR
+                  value: "0.80"
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: telegram
+                  mountPath: /secrets/telegram
+                  readOnly: true
+              resources:
+                requests: {cpu: "250m", memory: 512Mi}
+                limits: {cpu: "2", memory: 2Gi}
+          volumes:
+            - name: work
+              emptyDir: {}
+            - name: telegram
+              secret:
+                secretName: alertmanager-telegram
+                items:
+                  - {key: token, path: token}

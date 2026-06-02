@@ -43,11 +43,15 @@ spec:
               value: /app/models/isolation_forest.pkl
             - name: ARCHIVE_DIR
               value: /archive
+            - name: LIVE_MODEL_PATH
+              value: /models-live/isolation_forest.pkl
           volumeMounts:
             - name: config
               mountPath: /app/configs
             - name: archive
               mountPath: /archive
+            - name: live-model
+              mountPath: /models-live
           readinessProbe:
             httpGet:
               path: /health
@@ -79,6 +83,12 @@ spec:
         - name: archive
           hostPath:
             path: /var/lib/ebpf-detector-archive
+            type: DirectoryOrCreate
+        # Promoted (retrained) model, written by the retrain pipeline and loaded
+        # via /reload. hostPath so it survives restarts on that node.
+        - name: live-model
+          hostPath:
+            path: /var/lib/ebpf-detector-model
             type: DirectoryOrCreate
 ---
 # Keep at least one detector serving during voluntary disruptions

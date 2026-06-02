@@ -48,20 +48,34 @@ from detector.archive import FeatureArchive  # noqa: E402
 _CFG = load_config()
 _MODEL_PATH = os.environ.get("MODEL_PATH") or _CFG.get("model", {}).get(
     "path", "models/isolation_forest.pkl")
+# A retrained model promoted by the retrain pipeline lands here (hostPath); when
+# present it wins over the baked image model, enabling hot-swap without a rebuild.
+_LIVE_MODEL_PATH = os.environ.get("LIVE_MODEL_PATH", "")
 _FEATURE_ORDER = get_feature_order(_CFG)
 
 _bundle: Optional[ModelBundle] = None
 _bundle_err: Optional[str] = None
+_bundle_src: Optional[str] = None
+
+
+def _resolve_model_path() -> str:
+    """Prefer the live (retrained) model if it exists, else the baked one."""
+    if _LIVE_MODEL_PATH and os.path.exists(_LIVE_MODEL_PATH):
+        return _LIVE_MODEL_PATH
+    return _MODEL_PATH
 
 
 def _load_model() -> None:
-    global _bundle, _bundle_err
+    global _bundle, _bundle_err, _bundle_src
+    path = _resolve_model_path()
     try:
-        _bundle = ModelBundle.load(_MODEL_PATH)
+        _bundle = ModelBundle.load(path)
         _bundle_err = None
+        _bundle_src = path
     except Exception as exc:  # noqa: BLE001 - surface to /health
         _bundle = None
         _bundle_err = str(exc)
+        _bundle_src = path
 
 
 # --------------------------------------------------------------------------
@@ -190,7 +204,23 @@ async def health() -> dict:
         "error": _bundle_err,
         "feature_count": len(_FEATURE_ORDER),
         "threshold": getattr(_bundle, "score_threshold", None),
+        "model_source": _bundle_src,
+        "trained_at": getattr(_bundle, "metadata", {}).get("trained_at") if _bundle else None,
         "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+
+
+@app.post("/reload")
+def reload_model() -> dict:
+    """Re-read the model from disk (live path wins). Called by the retrain
+    pipeline after it promotes a new model into LIVE_MODEL_PATH."""
+    _load_model()
+    return {
+        "reloaded": _bundle is not None,
+        "model_source": _bundle_src,
+        "error": _bundle_err,
+        "trained_at": getattr(_bundle, "metadata", {}).get("trained_at") if _bundle else None,
+        "threshold": getattr(_bundle, "score_threshold", None),
     }
 
 

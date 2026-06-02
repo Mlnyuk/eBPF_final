@@ -1,0 +1,29 @@
+# Retrain pipeline image: detector code + ML deps + kubectl + curl.
+# Runs scripts/retrain_pipeline.sh as a CronJob (k8s/cronjob-retrain.yaml):
+# aggregate archive -> train candidate -> regression gate -> hot-swap + reload.
+FROM python:3.12-slim
+
+# kubectl (for exec-based transfer + reload) and curl (Telegram + /reload).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl ca-certificates \
+    && curl -sfL "https://dl.k8s.io/release/v1.30.5/bin/linux/amd64/kubectl" \
+        -o /usr/local/bin/kubectl \
+    && chmod +x /usr/local/bin/kubectl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY configs/ ./configs/
+COPY collector/ ./collector/
+COPY detector/ ./detector/
+COPY models/ ./models/
+# Labelled holdout for the regression gate (baked, fixed).
+COPY results/labeled14/ ./results/labeled14/
+COPY scripts/retrain_pipeline.sh /usr/local/bin/retrain_pipeline.sh
+RUN chmod +x /usr/local/bin/retrain_pipeline.sh
+
+ENV PYTHONUNBUFFERED=1
+ENTRYPOINT ["/usr/local/bin/retrain_pipeline.sh"]
