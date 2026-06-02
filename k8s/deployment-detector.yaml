@@ -71,9 +71,15 @@ spec:
         - name: config
           configMap:
             name: ebpf-final-config
+        # Node-local archive. RWX (longhorn share-manager) is not functional on
+        # this cluster, so we use hostPath instead of a ReadWriteMany PVC. Each
+        # replica writes a per-pod daily file (archive.py keys on HOSTNAME), so
+        # the two HA replicas on different nodes keep separate files — harvest
+        # from the detector nodes for the retraining corpus.
         - name: archive
-          persistentVolumeClaim:
-            claimName: ebpf-feature-archive
+          hostPath:
+            path: /var/lib/ebpf-detector-archive
+            type: DirectoryOrCreate
 ---
 # Keep at least one detector serving during voluntary disruptions
 # (node drain, rolling update, autoscaler eviction).
