@@ -47,7 +47,7 @@ for p in "${PODS[@]}"; do
     kubectl -n "$NS" exec "$p" -c detector -- cat "$f" > "$ARCH/${p}_${base}" 2>/dev/null || true
   done
 done
-mapfile -t DATA < <(find "$ARCH" -name 'features-*.csv' -size +1c)
+mapfile -t DATA < <(find "$ARCH" -name '*features-*.csv' -size +1c)
 if [ "${#DATA[@]}" -eq 0 ]; then
   notify "🟡 retrain: no archive data yet — skipping"; exit 0
 fi
