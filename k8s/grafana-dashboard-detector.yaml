@@ -1,0 +1,94 @@
+# Grafana dashboard for the eBPF anomaly detector, auto-provisioned by the
+# kube-prometheus-stack grafana sidecar (watches all namespaces for ConfigMaps
+# labelled grafana_dashboard=1). Panels are driven by the four /metrics series:
+# ebpf_anomaly_scored_total, ebpf_anomaly_detected_total,
+# ebpf_anomaly_score_last, ebpf_anomaly_score_max.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ebpf-detector-dashboard
+  namespace: ebpf-final
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: "eBPF"
+data:
+  ebpf-detector.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "schemaVersion": 39,
+      "title": "eBPF Anomaly Detector",
+      "tags": ["ebpf", "anomaly"],
+      "time": {"from": "now-1h", "to": "now"},
+      "refresh": "15s",
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {},
+            "hide": 0
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Scored rate (vectors/s)",
+          "type": "timeseries",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "fieldConfig": {"defaults": {"unit": "ops"}},
+          "targets": [
+            {"expr": "sum(rate(ebpf_anomaly_scored_total[5m]))", "legendFormat": "scored", "refId": "A"},
+            {"expr": "sum(rate(ebpf_anomaly_detected_total[5m]))", "legendFormat": "detected", "refId": "B"}
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Anomaly ratio (detected / scored)",
+          "type": "timeseries",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}},
+          "targets": [
+            {"expr": "sum(rate(ebpf_anomaly_detected_total[5m])) / clamp_min(sum(rate(ebpf_anomaly_scored_total[5m])), 1)", "legendFormat": "ratio", "refId": "A"}
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Latest anomaly score (per pod)",
+          "type": "timeseries",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "fieldConfig": {"defaults": {"unit": "short", "min": 0, "max": 1, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 0.7462}]}}},
+          "targets": [
+            {"expr": "ebpf_anomaly_score_last", "legendFormat": "{{pod}}", "refId": "A"}
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Detected total",
+          "type": "stat",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 8},
+          "fieldConfig": {"defaults": {"unit": "short"}},
+          "targets": [
+            {"expr": "sum(ebpf_anomaly_detected_total)", "refId": "A"}
+          ]
+        },
+        {
+          "id": 5,
+          "title": "Max score since start",
+          "type": "stat",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 4, "w": 6, "x": 18, "y": 8},
+          "fieldConfig": {"defaults": {"unit": "short", "min": 0, "max": 1, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 0.7462}]}}},
+          "targets": [
+            {"expr": "max(ebpf_anomaly_score_max)", "refId": "A"}
+          ]
+        }
+      ]
+    }

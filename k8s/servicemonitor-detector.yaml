@@ -1,0 +1,24 @@
+# Wires the detector's /metrics into the cluster kube-prometheus-stack.
+# The Prometheus operator's serviceMonitorSelector/NamespaceSelector are both
+# empty ({}), so it discovers ServiceMonitors in any namespace with no special
+# label required. (The legacy prometheus.io/scrape Service annotations are
+# ignored by the operator — this CRD is what actually enables scraping.)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ebpf-detector
+  namespace: ebpf-final
+  labels:
+    app: ebpf-detector
+spec:
+  namespaceSelector:
+    matchNames:
+      - ebpf-final
+  selector:
+    matchLabels:
+      app: ebpf-detector
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
