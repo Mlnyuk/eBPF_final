@@ -1,0 +1,95 @@
+# LLM anomaly triage. A few times per night (while Qwen3-32B is up), aggregate
+# the detector archive, build per-container baselines, ask Qwen to verdict the
+# high-confidence anomaly groups (benign|suspicious + cause + next check), and
+# post the digest to Telegram. The job self-skips (exit 0) when Qwen is offline,
+# so off-window firings are harmless. See scripts/qwen_triage.py.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ebpf-triage
+  namespace: ebpf-final
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ebpf-triage
+  namespace: ebpf-final
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ebpf-triage
+  namespace: ebpf-final
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ebpf-triage
+subjects:
+  - kind: ServiceAccount
+    name: ebpf-triage
+    namespace: ebpf-final
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ebpf-triage
+  namespace: ebpf-final
+spec:
+  # Qwen runs ~19:00–08:00 KST (10:00–23:00 UTC). Fire inside that window;
+  # off-window firings self-skip. 11/15/21 UTC = 20:00 / 00:00 / 06:00 KST.
+  schedule: "0 11,15,21 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 900
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          serviceAccountName: ebpf-triage
+          restartPolicy: Never
+          imagePullSecrets:
+            - name: ghcr-cred
+          containers:
+            - name: triage
+              image: ghcr.io/mlnyuk/ebpf-final-triage:latest
+              imagePullPolicy: Always
+              env:
+                - name: NAMESPACE
+                  value: ebpf-final
+                - name: QWEN_BASE
+                  value: http://qwen3-32b-5090.default:8000
+                - name: QWEN_MODEL
+                  value: qwen3-32b
+                - name: TELEGRAM_CHAT_ID
+                  value: "8098454352"
+                - name: SCORE_MIN
+                  value: "0.7"
+                - name: TOP_N
+                  value: "8"
+                # Stay quiet on clean/offline runs; only alert on real findings.
+                - name: NOTIFY_QUIET
+                  value: "true"
+              volumeMounts:
+                - name: telegram
+                  mountPath: /secrets/telegram
+                  readOnly: true
+              resources:
+                requests: {cpu: "100m", memory: 128Mi}
+                limits: {cpu: "1", memory: 512Mi}
+          volumes:
+            - name: telegram
+              secret:
+                secretName: alertmanager-telegram
+                items:
+                  - {key: token, path: token}

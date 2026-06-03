@@ -1,0 +1,38 @@
+# In-cluster build of the LLM-triage image (Dockerfile.triage) with kaniko.
+# Same pattern as k8s/kaniko-build.yaml: clone repo, build, push to GHCR.
+#
+#   kubectl apply -f k8s/kaniko-triage.yaml
+#   kubectl -n ebpf-final logs -f job/kaniko-triage
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kaniko-triage
+  namespace: ebpf-final
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - {key: node-role.kubernetes.io/control-plane, operator: DoesNotExist}
+      containers:
+        - name: kaniko
+          image: gcr.io/kaniko-project/executor:latest
+          args:
+            - "--context=git://github.com/Mlnyuk/eBPF_final.git#refs/heads/main"
+            - "--dockerfile=docker/Dockerfile.triage"
+            - "--destination=ghcr.io/mlnyuk/ebpf-final-triage:latest"
+            - "--cache=true"
+          volumeMounts:
+            - {name: docker-config, mountPath: /kaniko/.docker}
+      volumes:
+        - name: docker-config
+          secret:
+            secretName: ghcr-cred
+            items:
+              - {key: .dockerconfigjson, path: config.json}
