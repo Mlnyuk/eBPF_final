@@ -42,23 +42,27 @@ spec:
             description: "No feature vectors scored in 10m — collectors stopped pushing or the detector is wedged."
 
         # --- Anomaly volume ---
+        # Ratios use the EFFECTIVE (post-suppression) anomaly count so benign
+        # daemon noise — which the distilled noise filter suppresses — no longer
+        # trips these alerts. ebpf_anomaly_detected_total is the raw pre-filter
+        # count (kept for observability / filter audit).
         - alert: EbpfAnomalyRatioHigh
           expr: |
-            sum(rate(ebpf_anomaly_detected_total[5m]))
+            sum(rate(ebpf_anomaly_effective_total[5m]))
               / clamp_min(sum(rate(ebpf_anomaly_scored_total[5m])), 1) > 0.25
           for: 10m
           labels:
             severity: warning
           annotations:
-            summary: "Anomaly ratio elevated ({{ $value | humanizePercentage }})"
-            description: "Detected/scored ratio >25% for 10m (baseline ~10%) — possible widespread fault or model drift."
+            summary: "Effective anomaly ratio elevated ({{ $value | humanizePercentage }})"
+            description: "Effective(post-suppression)/scored ratio >25% for 10m — possible widespread fault or model drift."
         - alert: EbpfAnomalyRatioCritical
           expr: |
-            sum(rate(ebpf_anomaly_detected_total[5m]))
+            sum(rate(ebpf_anomaly_effective_total[5m]))
               / clamp_min(sum(rate(ebpf_anomaly_scored_total[5m])), 1) > 0.5
           for: 5m
           labels:
             severity: critical
           annotations:
-            summary: "Anomaly ratio critical ({{ $value | humanizePercentage }})"
+            summary: "Effective anomaly ratio critical ({{ $value | humanizePercentage }})"
             description: "Over half of all scored vectors flagged anomalous for 5m — active incident likely."

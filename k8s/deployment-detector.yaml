@@ -45,6 +45,12 @@ spec:
               value: /archive
             - name: LIVE_MODEL_PATH
               value: /models-live/isolation_forest.pkl
+            # Distilled noise filter (post-IF suppression of benign daemon noise).
+            # Artifacts baked into the image at models/; tune or disable here.
+            - name: NOISE_FILTER_ENABLED
+              value: "true"
+            - name: NOISE_FILTER_THRESHOLD
+              value: "0.99"
           volumeMounts:
             - name: config
               mountPath: /app/configs

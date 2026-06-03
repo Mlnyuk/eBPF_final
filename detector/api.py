@@ -40,6 +40,7 @@ from pydantic import BaseModel, Field  # noqa: E402
 from detector.model_utils import ModelBundle, load_config, get_feature_order  # noqa: E402
 from detector import detect as detect_mod  # noqa: E402
 from detector.archive import FeatureArchive  # noqa: E402
+from detector.noise_filter import from_env as _noise_from_env  # noqa: E402
 
 # --------------------------------------------------------------------------
 # Model loading
@@ -87,26 +88,35 @@ class _Metrics:
         self._lock = threading.Lock()
         self.total_scored = 0
         self.total_anomalies = 0
+        self.total_suppressed = 0
         self.last_score = 0.0
         self.max_score = 0.0
 
-    def observe(self, scores: List[float], anomalies: int) -> None:
+    def observe(self, scores: List[float], anomalies: int, suppressed: int = 0) -> None:
         with self._lock:
             self.total_scored += len(scores)
             self.total_anomalies += anomalies
+            self.total_suppressed += suppressed
             if scores:
                 self.last_score = scores[-1]
                 self.max_score = max(self.max_score, max(scores))
 
     def render(self) -> str:
         with self._lock:
+            effective = self.total_anomalies - self.total_suppressed
             lines = [
                 "# HELP ebpf_anomaly_scored_total Total feature vectors scored.",
                 "# TYPE ebpf_anomaly_scored_total counter",
                 f"ebpf_anomaly_scored_total {self.total_scored}",
-                "# HELP ebpf_anomaly_detected_total Total vectors flagged anomalous.",
+                "# HELP ebpf_anomaly_detected_total Total vectors flagged anomalous (raw, pre-suppression).",
                 "# TYPE ebpf_anomaly_detected_total counter",
                 f"ebpf_anomaly_detected_total {self.total_anomalies}",
+                "# HELP ebpf_anomaly_suppressed_total Flagged anomalies suppressed as benign daemon noise.",
+                "# TYPE ebpf_anomaly_suppressed_total counter",
+                f"ebpf_anomaly_suppressed_total {self.total_suppressed}",
+                "# HELP ebpf_anomaly_effective_total Anomalies after noise suppression (detected - suppressed).",
+                "# TYPE ebpf_anomaly_effective_total counter",
+                f"ebpf_anomaly_effective_total {effective}",
                 "# HELP ebpf_anomaly_score_last Most recent anomaly score (0..1).",
                 "# TYPE ebpf_anomaly_score_last gauge",
                 f"ebpf_anomaly_score_last {self.last_score}",
@@ -125,8 +135,12 @@ _metrics = _Metrics()
 
 _META_COLS = ["timestamp", "node", "namespace", "pod", "container"]
 _ARCHIVE_COLS = (["ingest_ts"] + _META_COLS + list(_FEATURE_ORDER)
-                 + ["anomaly_score", "is_anomaly", "trigger"])
+                 + ["anomaly_score", "is_anomaly", "trigger", "suppressed"])
 _archive = FeatureArchive(os.environ.get("ARCHIVE_DIR", ""), _ARCHIVE_COLS)
+
+# Distilled noise-suppression gate (post-IF). Disabled gracefully if artifacts
+# are missing or NOISE_FILTER_ENABLED=false. See detector/noise_filter.py.
+_noise = _noise_from_env()
 
 
 def _archive_rows(inputs: List[dict], results: List[dict]) -> None:
@@ -143,6 +157,7 @@ def _archive_rows(inputs: List[dict], results: List[dict]) -> None:
             "anomaly_score": res.get("anomaly_score"),
             "is_anomaly": res.get("is_anomaly"),
             "trigger": res.get("trigger"),
+            "suppressed": res.get("suppressed", False),
         })
     _archive.append(records)
 
@@ -206,6 +221,12 @@ async def health() -> dict:
         "threshold": getattr(_bundle, "score_threshold", None),
         "model_source": _bundle_src,
         "trained_at": getattr(_bundle, "metadata", {}).get("trained_at") if _bundle else None,
+        "noise_filter": {
+            "enabled": _noise.enabled,
+            "threshold": _noise.threshold,
+            "baselined_containers": len(_noise.baseline),
+            "error": _noise.error,
+        },
         "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
 
@@ -236,9 +257,12 @@ def detect(fv: FeatureVector) -> dict:
     bundle = _require_model()
     meta, feats = fv.split()
     result = detect_mod.detect_one(bundle, feats, meta=meta)
+    src = {**(meta or {}), **feats}
+    n_supp = _noise.annotate([src], [result])
+    result["effective_anomaly"] = bool(result["is_anomaly"]) and not result.get("suppressed")
     _metrics.observe([float(result["anomaly_score"])],
-                     1 if result["is_anomaly"] else 0)
-    _archive_rows([{**(meta or {}), **feats}], [result])
+                     1 if result["is_anomaly"] else 0, n_supp)
+    _archive_rows([src], [result])
     return result
 
 
@@ -258,9 +282,14 @@ def detect_batch(req: BatchRequest) -> dict:
     results = result_df.to_dict(orient="records")
     scores = [float(r["anomaly_score"]) for r in results]
     n_anom = sum(1 for r in results if r["is_anomaly"])
-    _metrics.observe(scores, n_anom)
+    n_supp = _noise.annotate(rows, results)
+    for r in results:
+        r["effective_anomaly"] = bool(r["is_anomaly"]) and not r.get("suppressed")
+    _metrics.observe(scores, n_anom, n_supp)
     _archive_rows(rows, results)
-    return {"count": len(results), "anomalies": n_anom, "results": results}
+    return {"count": len(results), "anomalies": n_anom,
+            "effective_anomalies": n_anom - n_supp, "suppressed": n_supp,
+            "results": results}
 
 
 @app.get("/metrics", response_class=PlainTextResponse)

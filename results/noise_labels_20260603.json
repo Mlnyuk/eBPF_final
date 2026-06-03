@@ -1,0 +1,533 @@
+{
+ "source_file": "/archive/features-20260603-ebpf-detector-7cdd5847b5-2lrg9.csv",
+ "n_anom": 20000,
+ "n_normal": 20000,
+ "n_groups": 80,
+ "labels": [
+  {
+   "node": "gpu-3",
+   "container": "cni-server",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.9
+  },
+  {
+   "node": "gpu-3",
+   "container": "pinger",
+   "trigger": "sigma",
+   "verdict": "suspicious",
+   "confidence": 0.7
+  },
+  {
+   "node": "gpu-3",
+   "container": "containerd.service",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "gpu-3",
+   "container": "cgroup",
+   "trigger": "both",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "gpu-3",
+   "container": "kubelet.service",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.9
+  },
+  {
+   "node": "gpu-1",
+   "container": "containerd.service",
+   "trigger": "both",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "gpu-1",
+   "container": "cni-server",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.9
+  },
+  {
+   "node": "gpu-1",
+   "container": "cgroup",
+   "trigger": "both",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "gpu-1",
+   "container": "kubelet.service",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.9
+  },
+  {
+   "node": "worker-1",
+   "container": "containerd.service",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "worker-1",
+   "container": "kubelet.service",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.9
+  },
+  {
+   "node": "worker-1",
+   "container": "cgroup",
+   "trigger": "both",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "infra-3",
+   "container": "containerd.service",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "infra-3",
+   "container": "kubelet.service",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.9
+  },
+  {
+   "node": "infra-3",
+   "container": "cgroup",
+   "trigger": "both",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "gpu-2",
+   "container": "instance-manager",
+   "trigger": "both",
+   "verdict": "suspicious",
+   "confidence": 0.7
+  },
+  {
+   "node": "gpu-2",
+   "container": "containerd.service",
+   "trigger": "both",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "gpu-2",
+   "container": "cgroup",
+   "trigger": "both",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "gpu-2",
+   "container": "cni-server",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.9
+  },
+  {
+   "node": "gpu-2",
+   "container": "kubelet.service",
+   "trigger": "model",
+   "verdict": "suspicious",
+   "confidence": 0.7
+  },
+  {
+   "node": "gpu-1",
+   "container": "containerd.service",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "infra-2",
+   "container": "containerd.service",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "infra-2",
+   "container": "cgroup",
+   "trigger": "both",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "worker-3",
+   "container": "containerd.service",
+   "trigger": "both",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "worker-3",
+   "container": "kubelet.service",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.9
+  },
+  {
+   "node": "worker-3",
+   "container": "cgroup",
+   "trigger": "both",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "infra-3",
+   "container": "containerd.service",
+   "trigger": "both",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "gpu-3",
+   "container": "containerd.service",
+   "trigger": "both",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "infra-1",
+   "container": "cgroup",
+   "trigger": "both",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "infra-1",
+   "container": "containerd.service",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "worker-2",
+   "container": "kubelet.service",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.9
+  },
+  {
+   "node": "worker-2",
+   "container": "cgroup",
+   "trigger": "both",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "worker-2",
+   "container": "containerd.service",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "gpu-1",
+   "container": "openvswitch",
+   "trigger": "sigma",
+   "verdict": "benign",
+   "confidence": 0.7
+  },
+  {
+   "node": "worker-3",
+   "container": "cni-server",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.9
+  },
+  {
+   "node": "worker-3",
+   "container": "kube-state-metrics",
+   "trigger": "sigma",
+   "verdict": "suspicious",
+   "confidence": 0.7
+  },
+  {
+   "node": "infra-1",
+   "container": "kubelet.service",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.9
+  },
+  {
+   "node": "infra-2",
+   "container": "kubelet.service",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.9
+  },
+  {
+   "node": "worker-1",
+   "container": "cni-server",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.9
+  },
+  {
+   "node": "infra-3",
+   "container": "kubelet.service",
+   "trigger": "both",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "gpu-3",
+   "container": "gpu-feature-discovery",
+   "trigger": "sigma",
+   "verdict": "suspicious",
+   "confidence": 0.6
+  },
+  {
+   "node": "infra-1",
+   "container": "cni-server",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.9
+  },
+  {
+   "node": "worker-1",
+   "container": "kubelet.service",
+   "trigger": "both",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "worker-2",
+   "container": "cni-server",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.9
+  },
+  {
+   "node": "worker-2",
+   "container": "openvswitch",
+   "trigger": "sigma",
+   "verdict": "benign",
+   "confidence": 0.7
+  },
+  {
+   "node": "worker-2",
+   "container": "detector",
+   "trigger": "sigma",
+   "verdict": "benign",
+   "confidence": 0.7
+  },
+  {
+   "node": "worker-2",
+   "container": "containerd.service",
+   "trigger": "both",
+   "verdict": "benign",
+   "confidence": 0.8
+  },
+  {
+   "node": "worker-1",
+   "container": "systemd-journald.service",
+   "trigger": "sigma",
+   "verdict": "suspicious",
+   "confidence": 0.6
+  },
+  {
+   "node": "infra-2",
+   "container": "cni-server",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.9
+  },
+  {
+   "node": "infra-3",
+   "container": "cni-server",
+   "trigger": "model",
+   "verdict": "benign",
+   "confidence": 0.9
+  },
+  {
+   "node": "infra-1",
+   "container": "openvswitch",
+   "trigger": "sigma",
+   "verdict": "benign",
+   "confidence": 0.1
+  },
+  {
+   "node": "gpu-2",
+   "container": "kubelet.service",
+   "trigger": "both",
+   "verdict": "suspicious",
+   "confidence": 0.8
+  },
+  {
+   "node": "gpu-3",
+   "container": "pinger",
+   "trigger": "both",
+   "verdict": "suspicious",
+   "confidence": 0.7
+  },
+  {
+   "node": "worker-3",
+   "container": "kubelet.service",
+   "trigger": "both",
+   "verdict": "benign",
+   "confidence": 0.2
+  },
+  {
+   "node": "infra-1",
+   "container": "systemd-journald.service",
+   "trigger": "sigma",
+   "verdict": "suspicious",
+   "confidence": 0.6
+  },
+  {
+   "node": "gpu-1",
+   "container": "collector",
+   "trigger": "sigma",
+   "verdict": "benign",
+   "confidence": 0.1
+  },
+  {
+   "node": "gpu-1",
+   "container": "unknown",
+   "trigger": "both",
+   "verdict": "suspicious",
+   "confidence": 0.9
+  },
+  {
+   "node": "worker-1",
+   "container": "containerd.service",
+   "trigger": "both",
+   "verdict": "suspicious",
+   "confidence": 0.9
+  },
+  {
+   "node": "infra-2",
+   "container": "containerd.service",
+   "trigger": "both",
+   "verdict": "suspicious",
+   "confidence": 0.9
+  },
+  {
+   "node": "gpu-2",
+   "container": "longhorn-manager",
+   "trigger": "model",
+   "verdict": "suspicious",
+   "confidence": 0.7
+  },
+  {
+   "node": "infra-2",
+   "container": "tetragon",
+   "trigger": "sigma",
+   "verdict": "benign",
+   "confidence": 0.1
+  },
+  {
+   "node": "infra-1",
+   "container": "kubelet.service",
+   "trigger": "both",
+   "verdict": "benign",
+   "confidence": 0.2
+  },
+  {
+   "node": "worker-2",
+   "container": "kubelet.service",
+   "trigger": "both",
+   "verdict": "benign",
+   "confidence": 0.2
+  },
+  {
+   "node": "gpu-3",
+   "container": "NetworkManager.service",
+   "trigger": "sigma",
+   "verdict": "suspicious",
+   "confidence": 0.6
+  },
+  {
+   "node": "infra-2",
+   "container": "openvswitch",
+   "trigger": "sigma",
+   "verdict": "benign",
+   "confidence": 0.1
+  },
+  {
+   "node": "worker-2",
+   "container": "collector",
+   "trigger": "sigma",
+   "verdict": "benign",
+   "confidence": 0.1
+  },
+  {
+   "node": "infra-2",
+   "container": "systemd-journald.service",
+   "trigger": "sigma",
+   "verdict": "suspicious",
+   "confidence": 0.6
+  },
+  {
+   "node": "gpu-2",
+   "container": "cni-server",
+   "trigger": "both",
+   "verdict": "benign",
+   "confidence": 0.1
+  },
+  {
+   "node": "gpu-1",
+   "container": "kubelet.service",
+   "trigger": "both",
+   "verdict": "suspicious",
+   "confidence": 0.8
+  },
+  {
+   "node": "worker-2",
+   "container": "longhorn-manager",
+   "trigger": "model",
+   "verdict": "suspicious",
+   "confidence": 0.7
+  },
+  {
+   "node": "gpu-1",
+   "container": "longhorn-manager",
+   "trigger": "model",
+   "verdict": "suspicious",
+   "confidence": 0.7
+  },
+  {
+   "node": "infra-2",
+   "container": "kubelet.service",
+   "trigger": "both",
+   "verdict": "benign",
+   "confidence": 0.2
+  },
+  {
+   "node": "worker-3",
+   "container": "openvswitch",
+   "trigger": "sigma",
+   "verdict": "benign",
+   "confidence": 0.1
+  },
+  {
+   "node": "gpu-1",
+   "container": "systemd-journald.service",
+   "trigger": "sigma",
+   "verdict": "suspicious",
+   "confidence": 0.6
+  },
+  {
+   "node": "gpu-3",
+   "container": "vllm",
+   "trigger": "sigma",
+   "verdict": "suspicious",
+   "confidence": 0.9
+  }
+ ]
+}
