@@ -39,6 +39,7 @@ class NoiseFilter:
         self.feats: List[str] = []
         self.baseline: Dict[str, Dict[str, float]] = {}
         self.error: str | None = None
+        self.source: str = model_path
         self.enabled = False
         if not enabled:
             return
@@ -97,11 +98,22 @@ class NoiseFilter:
 
 def from_env() -> "NoiseFilter":
     """Build a NoiseFilter from env / default paths. Disabled gracefully when the
-    artifacts are absent or NOISE_FILTER_ENABLED=false."""
+    artifacts are absent or NOISE_FILTER_ENABLED=false.
+
+    A retrained pair promoted by the distill pipeline into NOISE_FILTER_LIVE_DIR
+    (hostPath) wins over the baked artifacts, enabling hot-swap via /reload."""
     repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     model_path = os.environ.get("NOISE_FILTER_MODEL", os.path.join(repo, "models", "noise_filter.pkl"))
     baseline_path = os.environ.get("NOISE_FILTER_BASELINE", os.path.join(repo, "models", "noise_baseline.json"))
+    live_dir = os.environ.get("NOISE_FILTER_LIVE_DIR", "")
+    if live_dir:
+        lm = os.path.join(live_dir, "noise_filter.pkl")
+        lb = os.path.join(live_dir, "noise_baseline.json")
+        if os.path.exists(lm) and os.path.exists(lb):
+            model_path, baseline_path = lm, lb
     threshold = float(os.environ.get("NOISE_FILTER_THRESHOLD", "0.99"))
     enabled = os.environ.get("NOISE_FILTER_ENABLED", "true").lower() != "false"
     enabled = enabled and os.path.exists(model_path) and os.path.exists(baseline_path)
-    return NoiseFilter(model_path, baseline_path, threshold, enabled)
+    nf = NoiseFilter(model_path, baseline_path, threshold, enabled)
+    nf.source = model_path
+    return nf

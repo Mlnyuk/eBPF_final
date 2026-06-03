@@ -1,18 +1,17 @@
-# LLM anomaly triage. A few times per night (while Qwen3-32B is up), aggregate
-# the detector archive, build per-container baselines, ask Qwen to verdict the
-# high-confidence anomaly groups (benign|suspicious + cause + next check), and
-# post the digest to Telegram. The job self-skips (exit 0) when Qwen is offline,
-# so off-window firings are harmless. See scripts/qwen_triage.py.
+# Distill-automation CronJob. Nightly (while Qwen is up), re-distill the runtime
+# noise filter from the live anomaly stream and hot-swap it into the detectors
+# via /noise-live + /reload, behind a false-suppress promotion gate. Self-skips
+# when Qwen is offline. See scripts/distill_pipeline.sh.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: ebpf-triage
+  name: ebpf-distill
   namespace: ebpf-final
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: ebpf-triage
+  name: ebpf-distill
   namespace: ebpf-final
 rules:
   - apiGroups: [""]
@@ -25,26 +24,25 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: ebpf-triage
+  name: ebpf-distill
   namespace: ebpf-final
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: ebpf-triage
+  name: ebpf-distill
 subjects:
   - kind: ServiceAccount
-    name: ebpf-triage
+    name: ebpf-distill
     namespace: ebpf-final
 ---
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: ebpf-triage
+  name: ebpf-distill
   namespace: ebpf-final
 spec:
-  # Qwen runs ~19:00–08:00 KST (10:00–23:00 UTC). Fire inside that window;
-  # off-window firings self-skip. 11/15/21 UTC = 20:00 / 00:00 / 06:00 KST.
-  schedule: "0 11,15,21 * * *"
+  # 02:00 UTC = 11:00 KST. Off-schedule the LLM is down and the job self-skips.
+  schedule: "0 2 * * *"
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 600
   successfulJobsHistoryLimit: 3
@@ -52,17 +50,17 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 1
-      activeDeadlineSeconds: 900
+      activeDeadlineSeconds: 1800
       ttlSecondsAfterFinished: 86400
       template:
         spec:
-          serviceAccountName: ebpf-triage
+          serviceAccountName: ebpf-distill
           restartPolicy: Never
           imagePullSecrets:
             - name: ghcr-cred
           containers:
-            - name: triage
-              image: ghcr.io/mlnyuk/ebpf-final-triage:latest
+            - name: distill
+              image: ghcr.io/mlnyuk/ebpf-final-distill:latest
               imagePullPolicy: Always
               env:
                 - name: NAMESPACE
@@ -71,29 +69,30 @@ spec:
                   value: http://qwen3-32b-5090.default:8000
                 - name: QWEN_MODEL
                   value: qwen3-32b
-                # Ensemble cross-check: set QWEN2_BASE when the 14B serve is up.
-                # Empty => single-model triage (graceful).
+                # Two-model agreement: set when the 14B serve app is up.
+                # Leave QWEN2_BASE empty to label with 32B only (graceful).
                 - name: QWEN2_BASE
                   value: ""
                 - name: QWEN2_MODEL
                   value: qwen2.5-14b
                 - name: TELEGRAM_CHAT_ID
                   value: "8098454352"
-                - name: SCORE_MIN
-                  value: "0.7"
-                - name: TOP_N
-                  value: "8"
-                # Stay quiet on clean/offline runs; only alert on real findings.
-                - name: NOTIFY_QUIET
-                  value: "true"
+                - name: FALSE_SUPPRESS_FLOOR
+                  value: "0.01"
+                - name: NOISE_FILTER_THRESHOLD
+                  value: "0.99"
               volumeMounts:
+                - name: work
+                  mountPath: /work
                 - name: telegram
                   mountPath: /secrets/telegram
                   readOnly: true
               resources:
-                requests: {cpu: "100m", memory: 128Mi}
-                limits: {cpu: "1", memory: 512Mi}
+                requests: {cpu: "250m", memory: 512Mi}
+                limits: {cpu: "2", memory: 2Gi}
           volumes:
+            - name: work
+              emptyDir: {}
             - name: telegram
               secret:
                 secretName: alertmanager-telegram

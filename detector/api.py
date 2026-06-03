@@ -143,6 +143,13 @@ _archive = FeatureArchive(os.environ.get("ARCHIVE_DIR", ""), _ARCHIVE_COLS)
 _noise = _noise_from_env()
 
 
+def _load_noise() -> None:
+    """(Re)build the noise filter — live dir wins over baked. Called at startup
+    and by /reload after the distill pipeline promotes new artifacts."""
+    global _noise
+    _noise = _noise_from_env()
+
+
 def _archive_rows(inputs: List[dict], results: List[dict]) -> None:
     """Merge input feature dicts with their score columns and append to archive.
     inputs[i] holds meta+features; results[i] holds anomaly_score/is_anomaly/
@@ -208,6 +215,7 @@ app = FastAPI(title="eBPF_final anomaly detector", version="1.0")
 @app.on_event("startup")
 def _startup() -> None:
     _load_model()
+    _load_noise()
 
 
 @app.get("/health")
@@ -223,6 +231,7 @@ async def health() -> dict:
         "trained_at": getattr(_bundle, "metadata", {}).get("trained_at") if _bundle else None,
         "noise_filter": {
             "enabled": _noise.enabled,
+            "source": _noise.source,
             "threshold": _noise.threshold,
             "baselined_containers": len(_noise.baseline),
             "error": _noise.error,
@@ -233,15 +242,23 @@ async def health() -> dict:
 
 @app.post("/reload")
 def reload_model() -> dict:
-    """Re-read the model from disk (live path wins). Called by the retrain
-    pipeline after it promotes a new model into LIVE_MODEL_PATH."""
+    """Re-read the model AND noise filter from disk (live paths win). Called by
+    the retrain / distill pipelines after promoting new artifacts."""
     _load_model()
+    _load_noise()
     return {
         "reloaded": _bundle is not None,
         "model_source": _bundle_src,
         "error": _bundle_err,
         "trained_at": getattr(_bundle, "metadata", {}).get("trained_at") if _bundle else None,
         "threshold": getattr(_bundle, "score_threshold", None),
+        "noise_filter": {
+            "enabled": _noise.enabled,
+            "source": _noise.source,
+            "threshold": _noise.threshold,
+            "baselined_containers": len(_noise.baseline),
+            "error": _noise.error,
+        },
     }
 
 

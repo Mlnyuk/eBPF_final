@@ -51,6 +51,9 @@ spec:
               value: "true"
             - name: NOISE_FILTER_THRESHOLD
               value: "0.99"
+            # Promoted (re-distilled) filter artifacts land here; win over baked.
+            - name: NOISE_FILTER_LIVE_DIR
+              value: /noise-live
           volumeMounts:
             - name: config
               mountPath: /app/configs
@@ -58,6 +61,8 @@ spec:
               mountPath: /archive
             - name: live-model
               mountPath: /models-live
+            - name: noise-live
+              mountPath: /noise-live
           readinessProbe:
             httpGet:
               path: /health
@@ -97,6 +102,12 @@ spec:
         - name: live-model
           hostPath:
             path: /var/lib/ebpf-detector-model
+            type: DirectoryOrCreate
+        # Re-distilled noise filter (noise_filter.pkl + noise_baseline.json),
+        # written by the distill pipeline and loaded via /reload.
+        - name: noise-live
+          hostPath:
+            path: /var/lib/ebpf-detector-noise
             type: DirectoryOrCreate
 ---
 # Keep at least one detector serving during voluntary disruptions

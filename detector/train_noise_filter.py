@@ -79,6 +79,8 @@ def main() -> int:
     ap.add_argument("--min-leaf", type=int, default=50)
     ap.add_argument("--threshold", type=float, default=0.99,
                     help="runtime suppress proba (reported here for the eval only)")
+    ap.add_argument("--metrics-out", default="",
+                    help="write CV metrics JSON here (for the promotion gate)")
     args = ap.parse_args()
 
     rows = list(csv.DictReader(open(args.rows)))
@@ -110,6 +112,15 @@ def main() -> int:
     print(f"CV @thr={args.threshold}: noise_reduced={gs/max(benN,1):.1%} "
           f"false_suppress={fs/max(keepN,1):.2%} ({fs} real silenced)")
     print("confusion(thr) [true x supp?]:\n", confusion_matrix(y, supp.astype(int)))
+
+    if args.metrics_out:
+        json.dump({"n_labeled": int(len(y)), "benign": int(y.sum()),
+                   "suspicious": int((1 - y).sum()),
+                   "noise_reduced": gs / max(benN, 1),
+                   "false_suppress": fs / max(keepN, 1),
+                   "real_silenced": fs, "threshold": args.threshold,
+                   "baselined_containers": len(baseline)},
+                  open(args.metrics_out, "w"))
 
     clf.fit(X, y)
     joblib.dump({"model": clf, "cols": cols, "feats": FEATS}, args.out_model)

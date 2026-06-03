@@ -27,6 +27,9 @@ from datetime import datetime, timezone
 NS          = os.environ.get("NAMESPACE", "ebpf-final")
 QWEN_BASE   = os.environ.get("QWEN_BASE", "http://qwen3-32b-5090.default:8000")
 QWEN_MODEL  = os.environ.get("QWEN_MODEL", "qwen3-32b")
+# Optional second model for ensemble cross-check (e.g. the 14B). Empty => single.
+QWEN2_BASE  = os.environ.get("QWEN2_BASE", "")
+QWEN2_MODEL = os.environ.get("QWEN2_MODEL", "qwen2.5-14b")
 CHAT_ID     = os.environ.get("TELEGRAM_CHAT_ID", "")
 TOKEN_FILE  = os.environ.get("TELEGRAM_TOKEN_FILE", "/secrets/telegram/token")
 ANOM_TAIL   = int(os.environ.get("ANOM_TAIL", "4000"))
@@ -195,29 +198,77 @@ SYS_PROMPT = (
     "deviates from its OWN baseline — NOT by absolute magnitude (system daemons "
     "like containerd/kubelet/cgroup naturally run high; that is their normal). "
     "Feature rates are per-second medians. trigger: model=IF, z=z-score tail, "
-    "both=both.\nFor each group output exactly:\n"
-    "  <node>/<container> [trigger] — VERDICT(benign|suspicious) conf=NN%\n"
-    "  cause: <one line, cite the deviating feature vs its baseline>\n"
-    "  check: <one concrete command/action>\n"
-    "A group with empty notable_deviations is almost certainly benign (IF "
-    "over-sensitive). Say so.")
+    "both=both. A group with empty notable_deviations is almost certainly benign "
+    "(IF over-sensitive).\nOutput STRICT JSON only: {\"triage\":[{\"node\":..,"
+    "\"container\":..,\"trigger\":..,\"verdict\":\"benign|suspicious\","
+    "\"confidence\":0..1,\"cause\":\"one line\",\"check\":\"one concrete action\"}]}"
+    " — one entry per input group, same order.")
 
 
-def ask_qwen(groups, total):
-    usr = (f"Flagged groups (top {len(groups)} of {total} high-confidence):\n"
+def ask_model(base, model, groups, total):
+    """Return {(node,container,trigger): {verdict,confidence,cause,check}}."""
+    usr = (f"Triage these {len(groups)} of {total} high-confidence groups:\n"
            + json.dumps(groups, indent=1))
-    payload = {"model": QWEN_MODEL, "temperature": 0, "max_tokens": MAX_TOKENS,
+    payload = {"model": model, "temperature": 0, "max_tokens": MAX_TOKENS,
                "chat_template_kwargs": {"enable_thinking": False},
+               "response_format": {"type": "json_object"},
                "messages": [{"role": "system", "content": SYS_PROMPT},
                             {"role": "user", "content": usr}]}
-    req = urllib.request.Request(f"{QWEN_BASE}/v1/chat/completions",
+    req = urllib.request.Request(f"{base}/v1/chat/completions",
                                  data=json.dumps(payload).encode(),
                                  headers={"Content-Type": "application/json"})
     t = time.time()
     out = json.load(urllib.request.urlopen(req, timeout=300))
-    log(f"qwen replied in {time.time() - t:.1f}s "
-        f"(usage={json.dumps(out.get('usage', {}))})")
-    return out["choices"][0]["message"]["content"]
+    txt = out["choices"][0]["message"]["content"]
+    s, e = txt.find("{"), txt.rfind("}")            # strip ```json fences
+    if s >= 0 and e > s:
+        txt = txt[s:e + 1]
+    items = json.loads(txt).get("triage", [])
+    log(f"{model} replied in {time.time() - t:.1f}s ({len(items)} verdicts)")
+    return {(i.get("node"), i.get("container"), i.get("trigger")): i for i in items}
+
+
+def ensemble_triage(groups, total):
+    """Query each available model, cross-check verdicts, build a Telegram digest.
+    Disagreements between models are flagged for human review."""
+    models = [(QWEN_BASE, QWEN_MODEL)]
+    if QWEN2_BASE:
+        models.append((QWEN2_BASE, QWEN2_MODEL))
+    per_model = []
+    for base, model in models:
+        try:
+            per_model.append((model, ask_model(base, model, groups, total)))
+        except Exception as e:  # noqa: BLE001 - degrade to whatever answered
+            log(f"{model} FAILED: {e}")
+    if not per_model:
+        return None
+    n_models = len(per_model)
+    lines, n_susp, n_disagree = [], 0, 0
+    for g in groups:
+        k = (g["node"], g["container"], g["trigger"])
+        votes = [(m, d[k]) for m, d in per_model if k in d]
+        if not votes:
+            continue
+        verdicts = [v["verdict"] for _, v in votes]
+        agree = len(set(verdicts)) == 1
+        # consensus: suspicious if ANY model says so (conservative)
+        verdict = "benign" if all(v == "benign" for v in verdicts) else "suspicious"
+        prim = votes[0][1]                         # primary model's cause/check
+        if verdict == "suspicious":
+            n_susp += 1
+        tag = "🟢" if verdict == "benign" else "🔴"
+        flag = ""
+        if n_models > 1 and not agree:
+            n_disagree += 1
+            split = " ".join(f"{m.split('-')[0]}={vd['verdict']}" for m, vd in votes)
+            flag = f"  ⚠️DISAGREE({split})"
+        lines.append(f"{tag} {k[0]}/{k[1]} [{k[2]}] — {verdict.upper()}{flag}\n"
+                     f"    cause: {prim.get('cause','-')}\n"
+                     f"    check: {prim.get('check','-')}")
+    body = "\n".join(lines)
+    meta = {"models": [m for m, _ in per_model], "suspicious": n_susp,
+            "disagreements": n_disagree, "shown": len(lines)}
+    return body, meta
 
 
 def main():
@@ -256,12 +307,19 @@ def main():
                           f"(sampled ratio {ratio:.0%}).")
         return 0
 
-    verdict = ask_qwen(groups[:TOP_N], len(groups))
-    header = (f"🔎 *eBPF LLM triage* — {date_str}\n"
-              f"sampled anomaly ratio {ratio:.0%}, "
-              f"{len(groups)} high-conf groups (top {min(TOP_N, len(groups))}):\n\n")
-    send_telegram(header + verdict)
-    log("digest sent")
+    res = ensemble_triage(groups[:TOP_N], len(groups))
+    if res is None:
+        log("all models failed to triage")
+        return 1
+    body, meta = res
+    model_str = "+".join(meta["models"])
+    disagree = (f", ⚠️{meta['disagreements']} disagreements"
+                if meta["disagreements"] else "")
+    header = (f"🔎 eBPF LLM triage — {date_str} [{model_str}]\n"
+              f"anomaly ratio {ratio:.0%}, {len(groups)} high-conf groups, "
+              f"{meta['suspicious']} suspicious{disagree} (top {meta['shown']}):\n\n")
+    send_telegram(header + body)
+    log(f"digest sent ({meta})")
     return 0
 
 
