@@ -29,6 +29,8 @@ THRESHOLD="${NOISE_FILTER_THRESHOLD:-0.99}"
 CHAT_ID="${TELEGRAM_CHAT_ID:-}"
 TOKEN_FILE="${TELEGRAM_TOKEN_FILE:-/secrets/telegram/token}"
 WORK="${WORK_DIR:-/work}"
+LABELER_SRC="${LABELER_SRC:-/app/scripts/qwen_distill_label.py}"  # in-image default; host runs override
+TRAINER_SRC="${TRAINER_SRC:-/app/detector/train_noise_filter.py}" # in-image default; host runs override
 mkdir -p "$WORK"
 
 log(){ echo "[$(date -u +%H:%M:%S)] $*"; }
@@ -61,7 +63,7 @@ kubectl exec -i "$LABELER_POD" -n "$NS" -c detector -- \
   env QWEN_BASE="$QWEN_BASE" QWEN_MODEL="$QWEN_MODEL" \
       QWEN2_BASE="$QWEN2_BASE" QWEN2_MODEL="$QWEN2_MODEL" \
       ANOM_TAIL="$ANOM_TAIL" NORMAL_TAIL="$NORMAL_TAIL" \
-  python3 - < /app/scripts/qwen_distill_label.py > "$WORK/labels.json" 2>"$WORK/label.err"
+  python3 - < "$LABELER_SRC" > "$WORK/labels.json" 2>"$WORK/label.err"
 sed -n '$p' "$WORK/label.err" >/dev/null; cat "$WORK/label.err" >&2
 N_LABELS=$(python3 -c "import json;print(len(json.load(open('$WORK/labels.json')).get('labels',[])))" 2>/dev/null || echo 0)
 log "labels: $N_LABELS"
@@ -83,7 +85,7 @@ done
 log "training rows: $(($(wc -l < "$ROWS")-1))"
 
 # 4. distill + metrics
-python3 /app/detector/train_noise_filter.py \
+python3 "$TRAINER_SRC" \
   --rows "$ROWS" --labels "$WORK/labels.json" \
   --out-model "$WORK/noise_filter.pkl" --out-baseline "$WORK/noise_baseline.json" \
   --metrics-out "$WORK/metrics.json" --threshold "$THRESHOLD" 2>&1 | tail -5
