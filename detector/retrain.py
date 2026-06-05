@@ -26,9 +26,10 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import os
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -48,15 +49,64 @@ from detector import detect as detect_mod  # noqa: E402
 
 META_COLS = ["timestamp", "node", "namespace", "pod", "container"]
 
+# Streaming/sampling bounds. The retrain corpus grows with archive history, but
+# the model only needs a representative sample (IsolationForest subsamples to
+# max_samples per tree anyway). We stream each file in CHUNK_ROWS-row blocks and
+# keep a uniform reservoir of at most MAX_TRAIN_ROWS rows, so the job's peak RAM
+# is bounded by the reservoir — not by how many days of archive have piled up.
+CHUNK_ROWS = 100_000
+MAX_TRAIN_ROWS = 300_000
+
 
 # --------------------------------------------------------------------------
 # Training
 # --------------------------------------------------------------------------
 
-def _read_any(path: Path) -> pd.DataFrame:
+def _iter_chunks(path: Path, chunk_rows: int):
+    """Yield DataFrame chunks from a CSV/JSONL archive file, never loading the
+    whole file into memory."""
     if path.suffix == ".jsonl":
-        return pd.read_json(path, lines=True)
-    return pd.read_csv(path)  # archive CSV has a header
+        reader = pd.read_json(path, lines=True, chunksize=chunk_rows)
+    else:
+        reader = pd.read_csv(path, chunksize=chunk_rows)  # archive CSV has a header
+    for chunk in reader:
+        yield chunk
+
+
+def _reservoir_sample(data_paths: List[str], feature_order: List[str], cap: int,
+                      normal_only: bool, seed: int) -> Tuple[np.ndarray, int, int]:
+    """Uniform random sample of up to `cap` feature rows streamed across the whole
+    corpus (Algorithm A-Res: draw a random key per row, keep the `cap` smallest
+    keys). Every row across all files has equal inclusion probability, independent
+    of corpus size, and peak memory stays ~`cap` + one chunk.
+
+    Returns (X, n_seen, n_kept) where n_seen counts every streamed row and n_kept
+    counts rows surviving the normal-only filter (the reservoir's population).
+    """
+    rng = np.random.default_rng(seed)
+    n_feat = len(feature_order)
+    keys = np.empty(0, dtype=np.float64)
+    res = np.empty((0, n_feat), dtype=np.float64)
+    n_seen = n_kept = 0
+    for p in data_paths:
+        path = Path(p)
+        if not path.exists():
+            continue
+        for chunk in _iter_chunks(path, CHUNK_ROWS):
+            n_seen += len(chunk)
+            if normal_only:
+                chunk = chunk[_normal_mask(chunk)]
+            if chunk.empty:
+                continue
+            n_kept += len(chunk)
+            Xc = frame_to_matrix(chunk, feature_order)
+            kc = rng.random(len(Xc))
+            keys = np.concatenate([keys, kc])
+            res = Xc if res.size == 0 else np.vstack([res, Xc])
+            if len(keys) > cap:
+                keep = np.argpartition(keys, cap)[:cap]
+                keys, res = keys[keep], res[keep]
+    return res, n_seen, n_kept
 
 
 def _normal_mask(df: pd.DataFrame) -> pd.Series:
@@ -71,19 +121,16 @@ def _normal_mask(df: pd.DataFrame) -> pd.Series:
 
 
 def train_candidate(data_paths: List[str], feature_order: List[str],
-                    cfg: dict, time_str: str, normal_only: bool = True) -> ModelBundle:
+                    cfg: dict, time_str: str, normal_only: bool = True,
+                    max_rows: int = MAX_TRAIN_ROWS, seed: int = 42) -> ModelBundle:
     mcfg = cfg.get("model", {})
     dcfg = cfg.get("detector", {})
-    frames = [_read_any(Path(p)) for p in data_paths if Path(p).exists()]
-    if not frames:
+    X, n_seen, n_kept = _reservoir_sample(
+        data_paths, feature_order, max_rows, normal_only, seed)
+    if n_seen == 0:
         raise SystemExit("retrain: no training data found")
-    df = pd.concat(frames, ignore_index=True)
-    if normal_only:
-        mask = _normal_mask(df)
-        kept = int(mask.sum())
-        print(f"[retrain] normal-only filter: {kept}/{len(df)} rows kept")
-        df = df[mask].reset_index(drop=True)
-    X = frame_to_matrix(df, feature_order)
+    filt = f"normal-only {n_kept}/{n_seen} kept; " if normal_only else f"{n_seen} streamed; "
+    print(f"[retrain] {filt}reservoir sampled {len(X)} rows (cap {max_rows})")
     if len(X) < 500:
         raise SystemExit(f"retrain: too few training rows ({len(X)}); aborting")
 
@@ -114,6 +161,7 @@ def train_candidate(data_paths: List[str], feature_order: List[str],
         sigma_threshold=float(dcfg.get("sigma_threshold", 10.0)),
         metadata={
             "n_train_samples": int(len(X)),
+            "n_rows_seen": int(n_seen),
             "train_means": X.mean(axis=0).tolist(),
             "train_stds": X.std(axis=0).tolist(),
             "sklearn_offset_": float(getattr(model, "offset_", 0.0)),
@@ -188,13 +236,20 @@ def main() -> None:
                     help="candidate min per-fault recall must be >= this")
     ap.add_argument("--all-rows", action="store_true",
                     help="train on every archived row (default: is_anomaly==False only)")
+    ap.add_argument("--max-train-rows", type=int,
+                    default=int(os.environ.get("MAX_TRAIN_ROWS", MAX_TRAIN_ROWS)),
+                    help="reservoir cap: train on at most this many sampled rows "
+                         "(bounds RAM regardless of corpus size)")
+    ap.add_argument("--seed", type=int, default=int(os.environ.get("RETRAIN_SEED", 42)),
+                    help="reservoir-sampling seed (deterministic candidate)")
     args = ap.parse_args()
 
     ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     verdict: Dict = {"trained_at": ts}
 
     cand = train_candidate(args.data, feature_order, cfg, ts,
-                           normal_only=not args.all_rows)
+                           normal_only=not args.all_rows,
+                           max_rows=args.max_train_rows, seed=args.seed)
     cand_eval = evaluate(cand, Path(args.holdout_normal), args.holdout_faults)
     verdict["candidate"] = cand_eval
     verdict["candidate"]["n_train_samples"] = cand.metadata["n_train_samples"]

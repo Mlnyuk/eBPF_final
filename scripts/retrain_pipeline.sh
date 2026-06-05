@@ -20,6 +20,7 @@ CHAT_ID="${TELEGRAM_CHAT_ID:-8098454352}"
 TOKEN_FILE="${TELEGRAM_TOKEN_FILE:-/secrets/telegram/token}"
 AUC_TOL="${AUC_TOL:-0.02}"
 RECALL_FLOOR="${RECALL_FLOOR:-0.80}"
+RETAIN_DAYS="${RETAIN_DAYS:-14}"   # archive retention window (disk + page-cache cap)
 mkdir -p "$ARCH"
 
 notify() {  # $1 = text (real newlines ok)
@@ -40,8 +41,15 @@ fi
 echo "[retrain] detector pods: ${PODS[*]}"
 
 # --- 2. aggregate archive corpus (exec cat per file) ---
+# Retention first: the detector appends to these files continuously, so without
+# a cap the corpus (and the page cache backing it) grows unbounded — pinning
+# detector pods near their memory limit and blowing up this job's transfer +
+# RAM. Drop files older than RETAIN_DAYS in-pod, then pull only what remains.
 for p in "${PODS[@]}"; do
-  files="$(kubectl -n "$NS" exec "$p" -c detector -- sh -c 'ls /archive/features-*.csv 2>/dev/null' || true)"
+  kubectl -n "$NS" exec "$p" -c detector -- \
+    find /archive -name 'features-*.csv' -type f -mtime +"$RETAIN_DAYS" -delete 2>/dev/null || true
+  files="$(kubectl -n "$NS" exec "$p" -c detector -- \
+    find /archive -name 'features-*.csv' -type f -mtime -"$RETAIN_DAYS" 2>/dev/null || true)"
   for f in $files; do
     base="$(basename "$f")"
     kubectl -n "$NS" exec "$p" -c detector -- cat "$f" > "$ARCH/${p}_${base}" 2>/dev/null || true
