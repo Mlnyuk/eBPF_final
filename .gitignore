@@ -18,6 +18,12 @@ results/*.jsonl
 # Intermediate per-node baseline harvest (superseded by results/real_normal_baseline_45m.csv)
 data/real/
 data/real2/
+# Triage pipeline generated artifacts (regenerate via the pipeline; generator IS tracked)
+data/cases/
+data/labels/
+data/features/*.jsonl
+models/metrics.json
+reports/*.json
 
 # OS / editor
 .DS_Store

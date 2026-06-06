@@ -41,6 +41,8 @@ from detector.model_utils import ModelBundle, load_config, get_feature_order  # 
 from detector import detect as detect_mod  # noqa: E402
 from detector.archive import FeatureArchive  # noqa: E402
 from detector.noise_filter import from_env as _noise_from_env  # noqa: E402
+from policy.policy_filter import from_env as _policy_from_env  # noqa: E402
+from src.triage.infer import from_env as _triage_from_env  # noqa: E402
 
 # --------------------------------------------------------------------------
 # Model loading
@@ -91,15 +93,29 @@ class _Metrics:
         self.total_suppressed = 0
         self.last_score = 0.0
         self.max_score = 0.0
+        # policy-layer escalation decisions (suppress is owned by the noise filter)
+        self.policy_actions = {"suppress": 0, "wait": 0, "triage": 0, "alert": 0}
+        # cost-sensitive triage decisions (4-class severity -> expected-cost action)
+        self.triage_actions = {"suppress": 0, "wait": 0, "triage": 0, "alert": 0}
 
-    def observe(self, scores: List[float], anomalies: int, suppressed: int = 0) -> None:
+    def observe(self, scores: List[float], anomalies: int, suppressed: int = 0,
+                policy_counts: Optional[Dict[str, int]] = None) -> None:
         with self._lock:
             self.total_scored += len(scores)
             self.total_anomalies += anomalies
             self.total_suppressed += suppressed
+            if policy_counts:
+                for a, n in policy_counts.items():
+                    if a in self.policy_actions:
+                        self.policy_actions[a] += n
             if scores:
                 self.last_score = scores[-1]
                 self.max_score = max(self.max_score, max(scores))
+
+    def observe_triage(self, action: str) -> None:
+        with self._lock:
+            if action in self.triage_actions:
+                self.triage_actions[action] += 1
 
     def render(self) -> str:
         with self._lock:
@@ -123,7 +139,17 @@ class _Metrics:
                 "# HELP ebpf_anomaly_score_max Max anomaly score observed since start.",
                 "# TYPE ebpf_anomaly_score_max gauge",
                 f"ebpf_anomaly_score_max {self.max_score}",
+                "# HELP ebpf_policy_action_total Policy-layer decisions on flagged anomalies by action.",
+                "# TYPE ebpf_policy_action_total counter",
             ]
+            for a in ("suppress", "wait", "triage", "alert"):
+                lines.append(f'ebpf_policy_action_total{{action="{a}"}} {self.policy_actions[a]}')
+            lines += [
+                "# HELP ebpf_triage_action_total Cost-sensitive triage decisions by action.",
+                "# TYPE ebpf_triage_action_total counter",
+            ]
+            for a in ("suppress", "wait", "triage", "alert"):
+                lines.append(f'ebpf_triage_action_total{{action="{a}"}} {self.triage_actions[a]}')
             return "\n".join(lines) + "\n"
 
 
@@ -135,12 +161,17 @@ _metrics = _Metrics()
 
 _META_COLS = ["timestamp", "node", "namespace", "pod", "container"]
 _ARCHIVE_COLS = (["ingest_ts"] + _META_COLS + list(_FEATURE_ORDER)
-                 + ["anomaly_score", "is_anomaly", "trigger", "suppressed"])
+                 + ["anomaly_score", "is_anomaly", "trigger", "suppressed",
+                    "policy_action", "policy_p_fault", "episode_id"])
 _archive = FeatureArchive(os.environ.get("ARCHIVE_DIR", ""), _ARCHIVE_COLS)
 
 # Distilled noise-suppression gate (post-IF). Disabled gracefully if artifacts
 # are missing or NOISE_FILTER_ENABLED=false. See detector/noise_filter.py.
 _noise = _noise_from_env()
+
+# Cost-sensitive policy layer (post noise filter). Chooses an escalation action
+# (wait/triage/alert) for surviving anomalies. See policy/policy_filter.py.
+_policy = _policy_from_env()
 
 
 def _load_noise() -> None:
@@ -148,6 +179,25 @@ def _load_noise() -> None:
     and by /reload after the distill pipeline promotes new artifacts."""
     global _noise
     _noise = _noise_from_env()
+
+
+def _load_policy() -> None:
+    """(Re)build the policy filter — live dir wins over baked. Called at startup
+    and by /reload after the policy pipeline promotes a new artifact."""
+    global _policy
+    _policy = _policy_from_env()
+
+
+# Cost-sensitive triage model (4-class severity -> expected-cost action). CPU-only
+# inference; the LLM adjudicator is NEVER on this path. See src/triage/.
+_triage = _triage_from_env()
+
+
+def _load_triage() -> None:
+    """(Re)load the triage model — live dir wins over baked. Called at startup and
+    by /reload after the triage train/eval pipeline promotes a new model."""
+    global _triage
+    _triage = _triage_from_env()
 
 
 def _archive_rows(inputs: List[dict], results: List[dict]) -> None:
@@ -165,6 +215,9 @@ def _archive_rows(inputs: List[dict], results: List[dict]) -> None:
             "is_anomaly": res.get("is_anomaly"),
             "trigger": res.get("trigger"),
             "suppressed": res.get("suppressed", False),
+            "policy_action": res.get("policy_action"),
+            "policy_p_fault": res.get("policy_p_fault"),
+            "episode_id": res.get("episode_id"),
         })
     _archive.append(records)
 
@@ -216,6 +269,8 @@ app = FastAPI(title="eBPF_final anomaly detector", version="1.0")
 def _startup() -> None:
     _load_model()
     _load_noise()
+    _load_policy()
+    _load_triage()
 
 
 @app.get("/health")
@@ -236,6 +291,20 @@ async def health() -> dict:
             "baselined_containers": len(_noise.baseline),
             "error": _noise.error,
         },
+        "policy_filter": {
+            "enabled": _policy.enabled,
+            "source": _policy.source,
+            "baseline_source": _policy.baseline_source,
+            "baselined_containers": len(_policy.baseline),
+            "error": _policy.error,
+        },
+        "triage": {
+            "enabled": _triage.enabled,
+            "ready": _triage.ready,
+            "source": _triage.source,
+            "model": _triage.model.model_name if _triage.model else None,
+            "error": _triage.error,
+        },
         "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
 
@@ -246,6 +315,8 @@ def reload_model() -> dict:
     the retrain / distill pipelines after promoting new artifacts."""
     _load_model()
     _load_noise()
+    _load_policy()
+    _load_triage()
     return {
         "reloaded": _bundle is not None,
         "model_source": _bundle_src,
@@ -258,6 +329,20 @@ def reload_model() -> dict:
             "threshold": _noise.threshold,
             "baselined_containers": len(_noise.baseline),
             "error": _noise.error,
+        },
+        "policy_filter": {
+            "enabled": _policy.enabled,
+            "source": _policy.source,
+            "baseline_source": _policy.baseline_source,
+            "baselined_containers": len(_policy.baseline),
+            "error": _policy.error,
+        },
+        "triage": {
+            "enabled": _triage.enabled,
+            "ready": _triage.ready,
+            "source": _triage.source,
+            "model": _triage.model.model_name if _triage.model else None,
+            "error": _triage.error,
         },
     }
 
@@ -277,10 +362,29 @@ def detect(fv: FeatureVector) -> dict:
     src = {**(meta or {}), **feats}
     n_supp = _noise.annotate([src], [result])
     result["effective_anomaly"] = bool(result["is_anomaly"]) and not result.get("suppressed")
+    pol_counts = _policy.annotate([src], [result])
     _metrics.observe([float(result["anomaly_score"])],
-                     1 if result["is_anomaly"] else 0, n_supp)
+                     1 if result["is_anomaly"] else 0, n_supp, pol_counts)
     _archive_rows([src], [result])
     return result
+
+
+@app.post("/triage")
+def triage(fv: FeatureVector) -> dict:
+    """Cost-sensitive triage for one feature vector: score it, then map class
+    probabilities to the expected-cost-minimising action. CPU-only; no LLM.
+
+    Returns 503 if no triage model is loaded (train via src.triage pipeline)."""
+    bundle = _require_model()
+    if not _triage.ready:
+        raise HTTPException(status_code=503,
+                            detail=f"triage model not loaded: {_triage.error}")
+    meta, feats = fv.split()
+    result = detect_mod.detect_one(bundle, feats, meta=meta)
+    eid = result.get("event_id") or (meta or {}).get("pod") or ""
+    decision = _triage.decide(feats, float(result["anomaly_score"]), event_id=str(eid))
+    _metrics.observe_triage(decision["recommended_action"])
+    return decision
 
 
 @app.post("/detect/batch")
@@ -302,10 +406,27 @@ def detect_batch(req: BatchRequest) -> dict:
     n_supp = _noise.annotate(rows, results)
     for r in results:
         r["effective_anomaly"] = bool(r["is_anomaly"]) and not r.get("suppressed")
-    _metrics.observe(scores, n_anom, n_supp)
+    pol_counts = _policy.annotate(rows, results)
+    _metrics.observe(scores, n_anom, n_supp, pol_counts)
+    # Optional cost-sensitive triage action per effective anomaly (CPU, no LLM).
+    triage_counts: Dict[str, int] = {}
+    if _triage.ready:
+        for src, r in zip(rows, results):
+            if not r.get("effective_anomaly"):
+                continue
+            d = _triage.decide(src, float(r["anomaly_score"]),
+                               event_id=str(r.get("event_id") or src.get("pod") or ""))
+            r["triage"] = {"recommended_action": d["recommended_action"],
+                           "true_class_prob": d["true_class_prob"],
+                           "model": d["model"]}
+            act = d["recommended_action"]
+            triage_counts[act] = triage_counts.get(act, 0) + 1
+            _metrics.observe_triage(act)
     _archive_rows(rows, results)
     return {"count": len(results), "anomalies": n_anom,
             "effective_anomalies": n_anom - n_supp, "suppressed": n_supp,
+            "policy_actions": pol_counts,
+            "triage_actions": triage_counts,
             "results": results}
 
 

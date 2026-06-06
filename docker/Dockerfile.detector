@@ -11,6 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY configs/ ./configs/
 COPY collector/ ./collector/
 COPY detector/ ./detector/
+COPY policy/ ./policy/
+COPY src/ ./src/
 COPY models/ ./models/
 
 ENV PYTHONUNBUFFERED=1 \

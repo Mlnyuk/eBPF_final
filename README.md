@@ -243,7 +243,49 @@ scrape_configs:
 In Grafana, graph `ebpf_anomaly_score_last` and alert on
 `rate(ebpf_anomaly_detected_total[5m])`.
 
-## 13. Limitations & future work
+## 13. Cost-sensitive triage layer (`src/triage/`)
+
+A supervised, cost-aware layer that routes each anomaly to
+`suppress | wait | triage | alert` by minimising expected operational cost.
+**Not reinforcement learning** — the action does not change cluster state and
+offline labels exist (see [`docs/why_not_rl.md`](docs/why_not_rl.md)). GPU roles:
+RTX 5090 = LLM adjudication only; V100 = batch label/train/eval; CPU = production
+inference (see [`docs/heterogeneous_gpu_label_factory.md`](docs/heterogeneous_gpu_label_factory.md)
+and [`docs/triage_pipeline.md`](docs/triage_pipeline.md)).
+
+```bash
+export PYTHONPATH=$PWD
+python data/features/_generate_sample.py                      # demo sample windows
+
+# 1. case bundles
+python -m src.triage.case_bundle \
+  --input data/features/windows.jsonl --output data/cases/cases.jsonl
+# 2. weak labels (+ hard-negative mining)
+python -m src.triage.weak_labeler \
+  --cases data/cases/cases.jsonl --out data/labels/labels.jsonl
+# 3. (optional) LLM-adjudicate ambiguous cases only (skips if Qwen down)
+python -m src.triage.llm_adjudicator \
+  --cases data/cases/cases.jsonl --out data/labels/labels.jsonl
+# 4. train cost-sensitive models (tree / RF / optional XGBoost)
+python -m src.triage.train_cost_sensitive \
+  --cases data/cases/cases.jsonl --labels data/labels/labels.jsonl --out models/
+# 5. cost-aware evaluation report
+python -m src.triage.evaluate \
+  --cases data/cases/cases.jsonl --labels data/labels/labels.jsonl \
+  --models models/ --out reports/triage_eval.md
+# 6. LLM adjudicator service (RTX 5090 node)
+uvicorn src.triage.llm_adjudicator:app --host 0.0.0.0 --port 8080
+
+# unit tests
+PYTHONPATH=$PWD pytest tests/test_triage.py -q
+```
+
+Production detector endpoints: `POST /triage` (CPU, no LLM), `POST /detect/batch`
+(adds a per-anomaly `triage` block), `/health` `triage` block, and
+`ebpf_triage_action_total{action=...}` metric. GPU manifests live in
+`manifests/gpu/`.
+
+## 14. Limitations & future work
 
 - **Network bytes** are TCP-only (via `tcp_sendmsg`/`tcp_cleanup_rbuf`); UDP and
   raw sockets are not counted.

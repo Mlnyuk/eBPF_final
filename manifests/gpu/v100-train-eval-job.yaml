@@ -1,0 +1,61 @@
+# V100 train + eval job — batch-train pool.
+#
+# Trains the cost-sensitive triage models (tree / RandomForest / optional XGBoost)
+# from the resolved labels, then writes a cost-aware evaluation report. CPU-only
+# by default (sklearn); the V100 pinning is for batch isolation. Models land in
+# the shared workspace; promote to the detector's /triage-live hostPath + POST
+# /reload (same hot-swap pattern as retrain/distill).
+#
+#   kubectl apply -f manifests/gpu/v100-train-eval-job.yaml
+#   kubectl -n ebpf-final logs -f job/v100-train-eval
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: v100-train-eval
+  namespace: ebpf-final
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: ghcr-cred
+      nodeSelector:
+        gpu-role: batch-train
+        gpu-model: v100
+      tolerations:
+        - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+      containers:
+        - name: train-eval
+          image: ghcr.io/mlnyuk/ebpf-final-detector:latest
+          imagePullPolicy: Always
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              python -m src.triage.train_cost_sensitive \
+                --cases /data/cases/cases.jsonl --labels /data/labels/labels.jsonl \
+                --out /data/models
+              python -m src.triage.evaluate \
+                --cases /data/cases/cases.jsonl --labels /data/labels/labels.jsonl \
+                --models /data/models --out /data/reports/triage_eval.md \
+                --json-out /data/reports/triage_eval.json
+              echo "=== eval report ==="; cat /data/reports/triage_eval.md
+              # Promote: copy models into the triage-live hostPath consumed by the
+              # detector, then trigger /reload on each detector pod.
+              # (left manual / to a pipeline; see docs/triage_pipeline.md)
+          volumeMounts:
+            - {name: triage-data, mountPath: /data}
+          # Uncomment to run an XGBoost GPU sweep on the V100:
+          # resources:
+          #   limits:
+          #     nvidia.com/gpu: 1
+          resources:
+            requests: {cpu: "1", memory: 1Gi}
+            limits: {cpu: "4", memory: 4Gi}
+      volumes:
+        - name: triage-data
+          hostPath:
+            path: /var/lib/ebpf-triage
+            type: DirectoryOrCreate

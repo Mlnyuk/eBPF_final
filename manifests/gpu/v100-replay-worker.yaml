@@ -1,0 +1,52 @@
+# V100 fault-replay worker — batch-train pool.
+#
+# Replays fault-injection experiments (scripts/) against a target workload to
+# generate labeled fault traffic for the corpus, and mines routine operational
+# spikes as HARD NEGATIVES (so the trainer sees real benign-but-spiky cases, not
+# only synthetic faults). The detector archives the resulting feature windows;
+# harvest them into /data/features/windows.jsonl for the weak-label worker.
+#
+#   kubectl apply -f manifests/gpu/v100-replay-worker.yaml
+#   kubectl -n ebpf-final logs -f job/v100-replay-worker
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: v100-replay-worker
+  namespace: ebpf-final
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: ghcr-cred
+      nodeSelector:
+        gpu-role: batch-train
+        gpu-model: v100
+      tolerations:
+        - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+      containers:
+        - name: replay
+          image: ghcr.io/mlnyuk/ebpf-final-detector:latest
+          imagePullPolicy: Always
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              # Fault replay scripts live in the image under scripts/. Each writes
+              # labeled fault windows (source_file names map to fault_type via
+              # src/triage/case_bundle.py:FILENAME_FAULT_HINTS).
+              echo "fault replay set: ${FAULTS:-cpu_stress disk_io_stress network_delay packet_loss}"
+              for f in ${FAULTS:-cpu_stress disk_io_stress network_delay packet_loss}; do
+                echo "[replay] $f"; sh "scripts/${f}.sh" || true
+              done
+              # Hard-negative mining is data-driven: routine spikes (cron, image
+              # pulls, jupyter startup) are labeled 'normal' by the weak labeler's
+              # HARD_NEGATIVE_HINTS — no injection needed, just capture them.
+          env:
+            - name: FAULTS
+              value: "cpu_stress disk_io_stress network_delay packet_loss"
+          resources:
+            requests: {cpu: "1", memory: 1Gi}
+            limits: {cpu: "4", memory: 4Gi}

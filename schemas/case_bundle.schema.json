@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ebpf-final/schemas/case_bundle.schema.json",
+  "title": "CaseBundle",
+  "description": "One anomaly event grouped into a labelable + trainable unit. Produced by src/triage/case_bundle.py from per-window feature rows. Feeds the weak labeler, the LLM adjudicator (ambiguous cases only), and the cost-sensitive trainer.",
+  "type": "object",
+  "required": [
+    "event_id", "created_at", "node", "namespace", "pod", "container",
+    "window_start", "window_end", "features"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "event_id": {"type": "string", "description": "Stable id: hash of identity + window_start."},
+    "created_at": {"type": "string", "format": "date-time"},
+    "cluster": {"type": "string"},
+    "node": {"type": "string"},
+    "namespace": {"type": "string"},
+    "pod": {"type": "string"},
+    "container": {"type": "string"},
+    "window_start": {"type": "string", "format": "date-time"},
+    "window_end": {"type": "string", "format": "date-time"},
+    "features": {
+      "type": "object",
+      "description": "Reduced 9-feature view derived from the 14-col collector schema (see src/triage/case_bundle.py:features_from_row).",
+      "required": [
+        "anomaly_score", "syscall_rate", "tcp_retrans", "disk_read_bytes",
+        "disk_write_bytes", "disk_latency_p95", "ctx_switch_rate",
+        "net_rx_bytes", "net_tx_bytes"
+      ],
+      "properties": {
+        "anomaly_score": {"type": "number"},
+        "syscall_rate": {"type": "number"},
+        "tcp_retrans": {"type": "number"},
+        "disk_read_bytes": {"type": "number"},
+        "disk_write_bytes": {"type": "number"},
+        "disk_latency_p95": {"type": "number"},
+        "ctx_switch_rate": {"type": "number"},
+        "net_rx_bytes": {"type": "number"},
+        "net_tx_bytes": {"type": "number"}
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "description": "Per-container rolling normal reference (5-min means).",
+      "properties": {
+        "anomaly_score_mean_5m": {"type": "number"},
+        "disk_latency_p95_mean_5m": {"type": "number"},
+        "syscall_rate_mean_5m": {"type": "number"}
+      }
+    },
+    "duration_windows": {
+      "type": "integer",
+      "description": "Consecutive anomalous windows for this identity (1 = single-window spike)."
+    },
+    "logs_summary": {"type": "string"},
+    "fault_metadata": {
+      "type": "object",
+      "properties": {
+        "is_injected": {"type": "boolean"},
+        "fault_type": {"type": "string"},
+        "fault_start": {"type": ["string", "null"]},
+        "fault_end": {"type": ["string", "null"]},
+        "source_file": {"type": ["string", "null"]}
+      }
+    },
+    "model_votes": {
+      "type": "object",
+      "description": "Per-model action vote used to detect disagreement (ambiguity gate).",
+      "properties": {
+        "threshold": {"type": "string", "enum": ["suppress", "wait", "triage", "alert"]},
+        "tree": {"type": "string", "enum": ["suppress", "wait", "triage", "alert"]},
+        "xgboost": {"type": "string", "enum": ["suppress", "wait", "triage", "alert"]},
+        "weak_label": {"type": "string", "enum": ["suppress", "wait", "triage", "alert"]}
+      }
+    }
+  }
+}

@@ -54,6 +54,21 @@ spec:
             # Promoted (re-distilled) filter artifacts land here; win over baked.
             - name: NOISE_FILTER_LIVE_DIR
               value: /noise-live
+            # Cost-sensitive policy layer (post noise filter): escalation routing
+            # wait/triage/alert. Baked model at models/; promoted model wins.
+            - name: POLICY_FILTER_ENABLED
+              value: "true"
+            - name: POLICY_FILTER_LIVE_DIR
+              value: /policy-live
+            # Cost-sensitive triage model (4-class severity -> expected-cost
+            # action). CPU-only inference; the LLM adjudicator is NEVER on this
+            # path. Promoted model in the live dir wins over the baked models/.
+            - name: TRIAGE_ENABLED
+              value: "true"
+            - name: TRIAGE_MODEL_DIR
+              value: /app/models
+            - name: TRIAGE_LIVE_DIR
+              value: /triage-live
           volumeMounts:
             - name: config
               mountPath: /app/configs
@@ -63,6 +78,10 @@ spec:
               mountPath: /models-live
             - name: noise-live
               mountPath: /noise-live
+            - name: policy-live
+              mountPath: /policy-live
+            - name: triage-live
+              mountPath: /triage-live
           readinessProbe:
             httpGet:
               path: /health
@@ -108,6 +127,18 @@ spec:
         - name: noise-live
           hostPath:
             path: /var/lib/ebpf-detector-noise
+            type: DirectoryOrCreate
+        # Promoted policy model (policy_filter.pkl), written by the policy
+        # pipeline and loaded via /reload. Shares the noise filter's baseline.
+        - name: policy-live
+          hostPath:
+            path: /var/lib/ebpf-detector-policy
+            type: DirectoryOrCreate
+        # Promoted triage model (triage_tree.joblib / random_forest.joblib),
+        # written by the v100 train/eval job and loaded via /reload. CPU-only.
+        - name: triage-live
+          hostPath:
+            path: /var/lib/ebpf-detector-triage
             type: DirectoryOrCreate
 ---
 # Keep at least one detector serving during voluntary disruptions

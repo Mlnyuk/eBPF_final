@@ -1,0 +1,55 @@
+# V100 weak-label worker — batch-train pool.
+#
+# CPU-bound sklearn/rules job (pinned to the V100 pool for isolation, not CUDA):
+#   feature windows -> case bundles -> weak labels (+ hard-negative mining).
+# Then optionally ships ambiguous cases to the LLM adjudicator (offline batch).
+#
+#   kubectl apply -f manifests/gpu/v100-weak-label-worker.yaml
+#   kubectl -n ebpf-final logs -f job/v100-weak-label-worker
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: v100-weak-label-worker
+  namespace: ebpf-final
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: ghcr-cred
+      nodeSelector:
+        gpu-role: batch-train
+        gpu-model: v100
+      tolerations:
+        - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+      containers:
+        - name: weak-label
+          image: ghcr.io/mlnyuk/ebpf-final-detector:latest
+          imagePullPolicy: Always
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              IN=${WINDOWS:-/data/features/windows.jsonl}
+              python -m src.triage.case_bundle --input "$IN" --output /data/cases/cases.jsonl
+              python -m src.triage.weak_labeler --cases /data/cases/cases.jsonl --out /data/labels/labels.jsonl
+              # Adjudicate only ambiguous cases with the LLM (skips if endpoint down).
+              python -m src.triage.llm_adjudicator --cases /data/cases/cases.jsonl --out /data/labels/labels.jsonl || true
+          env:
+            - name: QWEN_BASE
+              value: "http://qwen3-32b-5090.default:8000"
+            - name: QWEN_MODEL
+              value: "qwen3-32b"
+          volumeMounts:
+            - {name: triage-data, mountPath: /data}
+          resources:
+            requests: {cpu: "1", memory: 1Gi}
+            limits: {cpu: "4", memory: 4Gi}
+      volumes:
+        # Shared label-factory workspace on the batch node (cases/labels/models).
+        - name: triage-data
+          hostPath:
+            path: /var/lib/ebpf-triage
+            type: DirectoryOrCreate

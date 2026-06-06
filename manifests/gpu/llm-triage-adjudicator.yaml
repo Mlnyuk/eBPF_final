@@ -1,0 +1,66 @@
+# LLM triage adjudicator — RTX 5090 node.
+#
+# Thin FastAPI client that asks the night-only vLLM Qwen server to adjudicate
+# AMBIGUOUS triage cases only (model disagreement / mid-range score / missing
+# fault metadata / novel identity). NOT on the production detection path.
+#
+# Reuses the detector image (it already ships src/ + fastapi). No GPU request:
+# the GPU is consumed by the separate vLLM Qwen server, not by this client.
+#
+#   kubectl apply -f manifests/gpu/llm-triage-adjudicator.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-triage-adjudicator
+  namespace: ebpf-final
+  labels: {app: llm-triage-adjudicator}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: llm-triage-adjudicator}
+  template:
+    metadata:
+      labels: {app: llm-triage-adjudicator}
+    spec:
+      imagePullSecrets:
+        - name: ghcr-cred
+      nodeSelector:
+        gpu-role: llm-triage
+        gpu-model: rtx5090
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: adjudicator
+          image: ghcr.io/mlnyuk/ebpf-final-detector:latest
+          imagePullPolicy: Always
+          command: ["uvicorn", "src.triage.llm_adjudicator:app",
+                    "--host", "0.0.0.0", "--port", "8080"]
+          ports:
+            - {containerPort: 8080, name: http}
+          env:
+            # Point at the vLLM OpenAI-compatible server on the 5090.
+            - name: QWEN_BASE
+              value: "http://qwen3-32b-5090.default:8000"
+            - name: QWEN_MODEL
+              value: "qwen3-32b"
+            - name: ADJ_MAX_TOKENS
+              value: "512"
+          readinessProbe:
+            httpGet: {path: /health, port: 8080}
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests: {cpu: 200m, memory: 256Mi}
+            limits: {cpu: "1", memory: 512Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-triage-adjudicator
+  namespace: ebpf-final
+spec:
+  selector: {app: llm-triage-adjudicator}
+  ports:
+    - {port: 8080, targetPort: 8080, name: http}
