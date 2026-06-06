@@ -26,6 +26,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import sys
@@ -283,9 +284,25 @@ def _read_jsonl(path: Path) -> Iterable[Dict]:
                 yield json.loads(line)
 
 
+def _read_csv(path: Path) -> Iterable[Dict]:
+    """Stream rows from a detector archive CSV (features-*.csv). Values stay as
+    strings; features_from_row / _is_anomaly coerce them as needed."""
+    with path.open(newline="") as fh:
+        for row in csv.DictReader(fh):
+            yield row
+
+
+def _read_rows(path: Path) -> Iterable[Dict]:
+    """Dispatch on suffix: detector archive CSV or JSONL feature windows."""
+    if path.suffix.lower() == ".csv":
+        return _read_csv(path)
+    return _read_jsonl(path)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Build triage case bundles from feature windows.")
-    ap.add_argument("--input", required=True, help="JSONL feature/window rows")
+    ap.add_argument("--input", required=True,
+                    help="feature/window rows: JSONL, or a detector archive .csv")
     ap.add_argument("--output", required=True, help="JSONL case bundles out")
     ap.add_argument("--score-threshold", type=float, default=0.7,
                     help="anomaly_score gate when is_anomaly is absent")
@@ -303,7 +320,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     outp.parent.mkdir(parents=True, exist_ok=True)
     n = 0
     with outp.open("w") as out:
-        for b in bundles_from_rows(_read_jsonl(inp), args.score_threshold,
+        for b in bundles_from_rows(_read_rows(inp), args.score_threshold,
                                    args.hi, args.mid, args.window_seconds,
                                    args.all_windows):
             out.write(json.dumps(b.to_dict()) + "\n")
