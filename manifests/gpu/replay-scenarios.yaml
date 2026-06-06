@@ -1,0 +1,58 @@
+# Replay scenario catalog — the fault classes the label factory replays to build
+# a balanced triage corpus. Declarative reference for operators; the actual
+# injection scripts ship in the detector image under scripts/ and are driven by
+# the v100-replay-worker Job (FAULTS env). fault_type values match
+# src/triage/cost_matrix.py:FAULT_TYPES and weak_labeler FAULT_CLASS_FLOOR.
+#
+# SAFETY: control-plane load is read-only/low-QPS; GPU load is bounded to a
+# fraction of free VRAM and skips cleanly without a GPU/torch; memory/PVC sizes
+# are modest to avoid OOM-killing neighbours. Tune DURATION / intensity per node.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: triage-replay-scenarios
+  namespace: ebpf-final
+  labels: {app: triage-label-factory}
+data:
+  scenarios.yaml: |
+    scenarios:
+      - name: cpu
+        script: cpu_stress.sh
+        fault_type: cpu_pressure
+        class_floor: medium
+        signals: [syscall_rate, ctx_switch_rate, cpu_utilization]
+      - name: memory
+        script: mem_stress.sh
+        fault_type: memory_pressure
+        class_floor: medium
+        signals: [ctx_switch_rate, anomaly_score]
+      - name: network
+        script: network_delay.sh   # + packet_loss.sh
+        fault_type: tcp_retrans
+        class_floor: medium
+        signals: [tcp_retrans, net_rx_bytes, net_tx_bytes]
+      - name: disk
+        script: disk_io_stress.sh
+        fault_type: disk_io_latency
+        class_floor: medium
+        signals: [disk_read_bytes, disk_write_bytes, disk_latency_p95]
+      - name: pvc
+        script: pvc_io_stress.sh
+        fault_type: pvc_io_latency
+        class_floor: medium
+        signals: [disk_latency_p95, disk_read_bytes, disk_write_bytes]
+      - name: controlplane
+        script: controlplane_pressure.sh   # read-only, low QPS
+        fault_type: controlplane_pressure
+        class_floor: high                  # cluster-wide blast radius
+        signals: [syscall_rate, net_rx_bytes, ctx_switch_rate]
+      - name: gpu
+        script: gpu_mem_stress.sh          # bounded VRAM; no-ops without GPU
+        fault_type: gpu_pressure
+        class_floor: medium
+        signals: [ctx_switch_rate, anomaly_score]
+      - name: normal_hard_negative
+        script: normal_workload.sh         # benign build/backup/cron-like bursts
+        fault_type: none
+        class_floor: normal                # MUST be labeled normal (hard negative)
+        signals: [syscall_rate, disk_write_bytes, ctx_switch_rate]

@@ -32,19 +32,43 @@ expected_cost(action) = Σ_c  P(c | x) · COST_MATRIX[action][c]
 recommended_action    = argmin_action expected_cost(action)
 ```
 
-Default `COST_MATRIX` (lower is better) — silencing a real `high` is the most
-expensive cell:
+**Production default = recall-first.** Two matrices ship; the production stance
+penalises high-severity false negatives aggressively (missing a real incident is
+far worse than an extra page):
 
 ```
-            normal  low  medium  high
-suppress       0     1      6     20
-wait         0.5     0      3     12
-triage         1   0.5      0      4
-alert          3     2      1      0
+default (lower=better)            recall_first (PRODUCTION)
+            normal low med high               normal low med high
+suppress       0    1   6   20    suppress       0    2  15   60
+wait         0.5    0   3   12    wait         0.5    0   8   35
+triage         1  0.5   0    4    triage         1  0.5   0    8
+alert          3    2   1    0    alert          3    2   1    0
 ```
 
+Selected via `TRIAGE_COST_MODE` (env, default `recall_first`) or `--cost-mode`.
 Decoupling class probability from cost means you can **retune costs without
-retraining** (e.g. raise `suppress×high` if a high FN ever slips through).
+retraining** — the detector applies the cost matrix at inference, not the one
+baked into the model bundle.
+
+### Safety guardrails
+
+On top of the expected-cost argmin, hard guardrails guarantee that certain cases
+**can never be silently suppressed** (a guardrail can only *raise* the action):
+
+| Condition | Floor |
+|---|---|
+| `anomaly_score ≥ 0.9` | triage |
+| `P(high) ≥ 0.5` / `≥ 0.25` | alert / triage |
+| max class prob `< 0.5` (low confidence) | wait |
+| unknown workload (unattributed namespace/pod) | triage |
+
+The decision response carries a `guardrail` field listing any floor that fired.
+
+### Models
+
+`RandomForest` is the **production `/triage` inference model** (`load_first_available`
+prefers it). The `DecisionTree` is retained as an **explainable baseline** (still
+trained + evaluated). XGBoost is optional.
 
 ## Schemas
 

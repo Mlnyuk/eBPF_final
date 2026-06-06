@@ -45,8 +45,11 @@ FAULT_CLASS_FLOOR: Dict[str, str] = {
     "cpu_pressure": "medium",
     "memory_pressure": "medium",
     "disk_io_latency": "medium",
+    "pvc_io_latency": "medium",
     "tcp_retrans": "medium",
     "syscall_spike": "medium",
+    "controlplane_pressure": "high",   # control-plane faults are cluster-wide -> severe
+    "gpu_pressure": "medium",
     "unknown": "low",
     "none": "normal",
 }

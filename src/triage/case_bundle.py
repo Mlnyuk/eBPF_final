@@ -58,6 +58,15 @@ FILENAME_FAULT_HINTS: List[Tuple[str, str]] = [
     ("tcp", "tcp_retrans"),
     ("abnormal_requests", "syscall_spike"),
     ("syscall", "syscall_spike"),
+    ("pvc", "pvc_io_latency"),
+    ("volume", "pvc_io_latency"),
+    ("controlplane", "controlplane_pressure"),
+    ("control_plane", "controlplane_pressure"),
+    ("apiserver", "controlplane_pressure"),
+    ("etcd", "controlplane_pressure"),
+    ("gpu", "gpu_pressure"),
+    ("cuda", "gpu_pressure"),
+    ("nvidia", "gpu_pressure"),
 ]
 
 BASELINE_WINDOW_S = 300  # 5-minute rolling baseline

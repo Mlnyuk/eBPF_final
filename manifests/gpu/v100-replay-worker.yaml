@@ -34,19 +34,30 @@ spec:
           args:
             - |
               set -e
-              # Fault replay scripts live in the image under scripts/. Each writes
-              # labeled fault windows (source_file names map to fault_type via
-              # src/triage/case_bundle.py:FILENAME_FAULT_HINTS).
-              echo "fault replay set: ${FAULTS:-cpu_stress disk_io_stress network_delay packet_loss}"
-              for f in ${FAULTS:-cpu_stress disk_io_stress network_delay packet_loss}; do
-                echo "[replay] $f"; sh "scripts/${f}.sh" || true
+              # Replay scenarios live in the image under scripts/. Each writes
+              # labeled fault windows; source_file names map to fault_type via
+              # src/triage/case_bundle.py:FILENAME_FAULT_HINTS. Coverage:
+              #   cpu_stress              -> cpu_pressure
+              #   mem_stress              -> memory_pressure
+              #   network_delay/packet_loss -> tcp_retrans
+              #   disk_io_stress          -> disk_io_latency
+              #   pvc_io_stress           -> pvc_io_latency
+              #   controlplane_pressure   -> controlplane_pressure
+              #   gpu_mem_stress          -> gpu_pressure
+              #   normal_workload         -> normal (HARD NEGATIVE)
+              echo "replay scenarios: ${FAULTS}"
+              for f in ${FAULTS}; do
+                echo "[replay] $f (${DURATION:-60}s)"
+                sh "scripts/${f}.sh" "${DURATION:-60}" || true
               done
-              # Hard-negative mining is data-driven: routine spikes (cron, image
-              # pulls, jupyter startup) are labeled 'normal' by the weak labeler's
-              # HARD_NEGATIVE_HINTS — no injection needed, just capture them.
+              # Hard-negative mining is also data-driven: routine spikes (cron,
+              # image pulls, jupyter startup) are labeled 'normal' by the weak
+              # labeler's HARD_NEGATIVE_HINTS — normal_workload.sh seeds extra ones.
           env:
             - name: FAULTS
-              value: "cpu_stress disk_io_stress network_delay packet_loss"
+              value: "cpu_stress mem_stress network_delay packet_loss disk_io_stress pvc_io_stress controlplane_pressure gpu_mem_stress normal_workload"
+            - name: DURATION
+              value: "60"
           resources:
             requests: {cpu: "1", memory: 1Gi}
             limits: {cpu: "4", memory: 4Gi}

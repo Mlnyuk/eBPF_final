@@ -16,7 +16,12 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from src.triage.cost_matrix import CLASSES, recommended_action
+from src.triage.cost_matrix import (
+    CLASSES, GUARDRAILS, GuardrailConfig, decide_action, get_cost_matrix,
+)
+
+# Identity fields used by the unknown-workload guardrail.
+_IDENTITY_KEYS = ("cluster", "node", "namespace", "pod", "container")
 
 
 class TriageModel:
@@ -48,28 +53,39 @@ class TriageModel:
             raw = {str(c): float(pi) for c, pi in zip(self.model.classes_, p)}
         return {c: raw.get(c, 0.0) for c in CLASSES}
 
-    def decide(self, features: Dict[str, float],
-               event_id: str = "") -> Dict:
-        """Full triage decision for one feature vector."""
+    def decide(self, features: Dict[str, float], event_id: str = "",
+               identity: Optional[Dict[str, str]] = None,
+               cost_mode=None,
+               guardrails: GuardrailConfig = GUARDRAILS) -> Dict:
+        """Full triage decision for one feature vector.
+
+        Cost matrix: `cost_mode` (mode name / matrix) wins, else the recall-first
+        production default — NOT the matrix baked at train time (costs are
+        decoupled from the model, so they can be retuned without retraining).
+        Guardrails then floor the action so high-severity / unknown / low-confidence
+        cases can never be silently suppressed."""
         prob = self.proba(features)
-        action, costs = recommended_action(
-            prob, self.cost_matrix or None) if self.cost_matrix \
-            else recommended_action(prob)
+        action, costs, guard = decide_action(
+            prob, features, identity=identity,
+            cost_matrix=cost_mode, guardrails=guardrails)
         return {
             "event_id": event_id,
             "anomaly_score": float(features.get("anomaly_score", 0.0)),
             "true_class_prob": {k: round(v, 4) for k, v in prob.items()},
             "expected_cost": {k: round(v, 4) for k, v in costs.items()},
             "recommended_action": action,
+            "guardrail": guard,
             "model": self.model_name,
         }
 
 
 def load_first_available(models_dir: str | Path,
                          prefer: Optional[List[str]] = None) -> Optional[TriageModel]:
-    """Load the first existing model bundle (default preference: tree, then RF,
-    then xgboost) from a models directory."""
-    prefer = prefer or ["triage_tree", "random_forest", "xgboost"]
+    """Load the first existing model bundle from a models directory.
+
+    Default preference: RandomForest (production inference model), then the
+    DecisionTree (kept as an explainable baseline), then xgboost."""
+    prefer = prefer or ["random_forest", "triage_tree", "xgboost"]
     d = Path(models_dir)
     for name in prefer:
         p = d / f"{name}.joblib"
@@ -87,11 +103,13 @@ class TriageRuntime:
     dir wins over the baked one (mirrors the noise/policy hot-swap pattern)."""
 
     def __init__(self, enabled: bool, model: Optional[TriageModel],
-                 source: Optional[str], error: Optional[str]) -> None:
+                 source: Optional[str], error: Optional[str],
+                 cost_mode: str = "recall_first") -> None:
         self.enabled = enabled
         self.model = model
         self.source = source
         self.error = error
+        self.cost_mode = cost_mode
 
     @property
     def ready(self) -> bool:
@@ -99,13 +117,17 @@ class TriageRuntime:
 
     def decide(self, raw_features: Dict[str, float], anomaly_score: float,
                event_id: str = "") -> Optional[Dict]:
-        """Map raw 14-col features (+ anomaly_score) to a triage decision.
+        """Map raw 14-col features (+ anomaly_score) to a triage decision under
+        the recall-first cost matrix + safety guardrails. The raw row's identity
+        (namespace/pod/...) drives the unknown-workload guardrail.
         Returns None when triage is disabled / unloaded."""
         if not self.ready:
             return None
         from src.triage.case_bundle import features_from_row
         feats = features_from_row({**raw_features, "anomaly_score": anomaly_score})
-        return self.model.decide(feats, event_id=event_id)
+        identity = {k: raw_features.get(k, "") for k in _IDENTITY_KEYS}
+        return self.model.decide(feats, event_id=event_id,
+                                 identity=identity, cost_mode=self.cost_mode)
 
 
 def from_env() -> "TriageRuntime":
@@ -113,11 +135,13 @@ def from_env() -> "TriageRuntime":
       TRIAGE_ENABLED      (default true)
       TRIAGE_LIVE_DIR     promoted model dir (hostPath); wins if present
       TRIAGE_MODEL_DIR    baked model dir (default 'models')
+      TRIAGE_COST_MODE    cost matrix mode (default 'recall_first')
     """
     import os
     enabled = os.environ.get("TRIAGE_ENABLED", "true").lower() == "true"
+    cost_mode = os.environ.get("TRIAGE_COST_MODE", "recall_first")
     if not enabled:
-        return TriageRuntime(False, None, None, None)
+        return TriageRuntime(False, None, None, None, cost_mode)
     live = os.environ.get("TRIAGE_LIVE_DIR", "")
     baked = os.environ.get("TRIAGE_MODEL_DIR", "models")
     for src in (live, baked):
@@ -126,7 +150,7 @@ def from_env() -> "TriageRuntime":
         try:
             m = load_first_available(src)
         except Exception as exc:  # noqa: BLE001 - surface via .error
-            return TriageRuntime(True, None, src, str(exc))
+            return TriageRuntime(True, None, src, str(exc), cost_mode)
         if m is not None:
-            return TriageRuntime(True, m, src, None)
-    return TriageRuntime(True, None, baked, "no triage model found")
+            return TriageRuntime(True, m, src, None, cost_mode)
+    return TriageRuntime(True, None, baked, "no triage model found", cost_mode)

@@ -303,6 +303,7 @@ async def health() -> dict:
             "ready": _triage.ready,
             "source": _triage.source,
             "model": _triage.model.model_name if _triage.model else None,
+            "cost_mode": _triage.cost_mode,
             "error": _triage.error,
         },
         "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -342,6 +343,7 @@ def reload_model() -> dict:
             "ready": _triage.ready,
             "source": _triage.source,
             "model": _triage.model.model_name if _triage.model else None,
+            "cost_mode": _triage.cost_mode,
             "error": _triage.error,
         },
     }
@@ -382,7 +384,9 @@ def triage(fv: FeatureVector) -> dict:
     meta, feats = fv.split()
     result = detect_mod.detect_one(bundle, feats, meta=meta)
     eid = result.get("event_id") or (meta or {}).get("pod") or ""
-    decision = _triage.decide(feats, float(result["anomaly_score"]), event_id=str(eid))
+    # Merge identity (namespace/pod/...) so the unknown-workload guardrail can fire.
+    decision = _triage.decide({**feats, **(meta or {})},
+                              float(result["anomaly_score"]), event_id=str(eid))
     _metrics.observe_triage(decision["recommended_action"])
     return decision
 
@@ -418,6 +422,7 @@ def detect_batch(req: BatchRequest) -> dict:
                                event_id=str(r.get("event_id") or src.get("pod") or ""))
             r["triage"] = {"recommended_action": d["recommended_action"],
                            "true_class_prob": d["true_class_prob"],
+                           "guardrail": d.get("guardrail", []),
                            "model": d["model"]}
             act = d["recommended_action"]
             triage_counts[act] = triage_counts.get(act, 0) + 1

@@ -69,6 +69,8 @@ spec:
               value: /app/models
             - name: TRIAGE_LIVE_DIR
               value: /triage-live
+            - name: TRIAGE_COST_MODE
+              value: recall_first
           volumeMounts:
             - name: config
               mountPath: /app/configs

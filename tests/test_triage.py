@@ -37,6 +37,50 @@ def test_action_for_pure_class_mapping():
     assert cm.action_for_pure_class("high") == "alert"
 
 
+# --------------------- recall-first matrix + guardrails ---------------------
+
+def test_recall_first_penalises_high_fn_harder():
+    assert cm.RECALL_FIRST_COST_MATRIX["suppress"]["high"] > cm.COST_MATRIX["suppress"]["high"]
+    assert cm.RECALL_FIRST_COST_MATRIX["wait"]["high"] > cm.COST_MATRIX["wait"]["high"]
+    # production default resolves to recall-first
+    assert cm.get_cost_matrix() is cm.RECALL_FIRST_COST_MATRIX
+    assert cm.get_cost_matrix("default") is cm.COST_MATRIX
+
+
+def test_guardrail_high_score_never_suppressed():
+    # confident normal prediction but high anomaly_score -> cannot suppress
+    prob = {"normal": 0.95, "low": 0.03, "medium": 0.01, "high": 0.01}
+    floor, reasons = cm.guardrail_floor(prob, {"anomaly_score": 0.95},
+                                        identity={"namespace": "default", "pod": "x"})
+    assert floor != "suppress" and reasons
+
+
+def test_guardrail_unknown_workload_never_suppressed():
+    prob = {"normal": 0.99, "low": 0.01, "medium": 0.0, "high": 0.0}
+    floor, reasons = cm.guardrail_floor(prob, {"anomaly_score": 0.1},
+                                        identity={"namespace": "unknown", "pod": "unknown"})
+    assert floor != "suppress" and "unknown_workload" in reasons
+
+
+def test_guardrail_low_confidence_floors_wait():
+    prob = {"normal": 0.4, "low": 0.3, "medium": 0.2, "high": 0.1}  # max<0.5
+    floor, _ = cm.guardrail_floor(prob, {"anomaly_score": 0.2},
+                                  identity={"namespace": "default", "pod": "x"})
+    assert cm.ACTION_SEVERITY[floor] >= cm.ACTION_SEVERITY["wait"]
+
+
+def test_decide_action_guardrail_raises_above_argmin():
+    # Confident-normal prediction -> cost argmin = suppress; but high anomaly_score
+    # trips the guardrail and floors the action above suppress.
+    prob = {"normal": 0.97, "low": 0.02, "medium": 0.01, "high": 0.0}
+    base, _ = cm.recommended_action(prob)
+    assert base == "suppress"
+    action, costs, guard = cm.decide_action(
+        prob, {"anomaly_score": 0.95}, identity={"namespace": "default", "pod": "x"})
+    assert action != "suppress" and guard
+    assert set(costs) == set(cm.ACTIONS)
+
+
 # --------------------------- case_bundle ---------------------------
 
 def test_features_from_row_maps_14col():
@@ -195,7 +239,26 @@ def test_train_and_infer_roundtrip(tmp_path):
 
     m = TriageModel.load(p)
     feats = {"anomaly_score": 0.95, "syscall_rate": 200, "ctx_switch_rate": 200}
-    out = m.decide(feats, event_id="t1")
+    out = m.decide(feats, event_id="t1", identity={"namespace": "default", "pod": "x"})
     assert out["recommended_action"] == "alert"
     assert set(out["true_class_prob"]) == set(cm.CLASSES)
     assert out["model"] == "triage_tree"
+    assert "guardrail" in out
+
+
+def test_load_prefers_random_forest(tmp_path):
+    pytest.importorskip("sklearn")
+    import numpy as np
+    from sklearn.tree import DecisionTreeClassifier
+    from sklearn.ensemble import RandomForestClassifier
+    from src.triage.train_cost_sensitive import save_bundle
+    from src.triage.infer import load_first_available
+
+    X = [[0.9, 1, 0, 0, 0, 1, 0, 0, 0], [0.1, 0, 0, 0, 0, 0, 0, 0, 0]] * 10
+    y = ["high", "normal"] * 10
+    tree = DecisionTreeClassifier(max_depth=2, random_state=0).fit(np.asarray(X), y)
+    rf = RandomForestClassifier(n_estimators=10, random_state=0).fit(np.asarray(X), y)
+    save_bundle(tmp_path / "triage_tree.joblib", "triage_tree", tree)
+    save_bundle(tmp_path / "random_forest.joblib", "random_forest", rf)
+    # default preference puts RandomForest first (production inference model)
+    assert load_first_available(tmp_path).model_name == "random_forest"
